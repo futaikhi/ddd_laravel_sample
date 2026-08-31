@@ -9,13 +9,13 @@ use DateTime;
 
 final class DateHelper
 {
-    public const int DAY = 24 * 60 * 60;
+    public const DAY = 24 * 60 * 60;
 
-    public const int WEEK = 7 * 24 * 60 * 60;
+    public const WEEK = 7 * 24 * 60 * 60;
 
-    public const int HOUR = 60 * 60;
+    public const HOUR = 60 * 60;
 
-    public const int YEAR = 24 * 60 * 60 * 365;
+    public const YEAR = 24 * 60 * 60 * 365;
 
     public static function getDurationWeeksAndDays(int $seconds): string
     {

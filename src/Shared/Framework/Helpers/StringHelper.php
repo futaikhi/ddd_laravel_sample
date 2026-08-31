@@ -81,8 +81,8 @@ final class StringHelper
         'EUR' => ['EUROS', 'EURO', 'EUR', '€'],
     ];
 
-    public const string MARKDOWN_BREAKLINE = '  ' . PHP_EOL;
-    public const string MARKDOWN_LINE_SEPARATOR = '---';
+    public const MARKDOWN_BREAKLINE = '  ' . PHP_EOL;
+    public const MARKDOWN_LINE_SEPARATOR = '---';
 
     /**
      * @throws Exception

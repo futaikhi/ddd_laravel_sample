@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 use Apps\Api\Booking\BookingController;
 use Apps\Api\Client\ClientController;
+use Apps\Api\Customer\CustomerController;
+use Apps\Api\Product\ProductController;
+use Apps\Api\Sales\SalesController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -29,4 +32,17 @@ Route::prefix('bookings')->group(function () {
     Route::get('/{id}', [BookingController::class, 'show']);
     Route::post('/{id}/confirm', [BookingController::class, 'confirm']);
     Route::post('/{id}/cancel', [BookingController::class, 'cancel']);
+});
+
+Route::prefix('customers')->group(function () {
+    Route::post('/', [CustomerController::class, 'create']);
+});
+
+Route::prefix('products')->group(function () {
+    Route::post('/', [ProductController::class, 'create']);
+});
+
+Route::prefix('sales')->group(function () {
+    Route::post('/', [SalesController::class, 'create']);
+    Route::post('/{id}/confirm', [SalesController::class, 'confirm']);
 });

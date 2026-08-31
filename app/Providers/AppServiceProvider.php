@@ -11,6 +11,8 @@ use Src\Reservation\Domain\Repositories\BookingReadModelRepositoryInterface;
 use Src\Reservation\Domain\Repositories\BookingRepositoryInterface;
 use Src\Reservation\Infrastructure\Persistence\BookingReadModelRepository;
 use Src\Reservation\Infrastructure\Persistence\BookingRepository;
+use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
+use Src\Sales\Infrastructure\Persistence\SaleRepository;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandBusInterface;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\SimpleCommandBus;
 use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
@@ -30,6 +32,9 @@ class AppServiceProvider extends ServiceProvider
         // Reservation repositories
         $this->app->bind(BookingRepositoryInterface::class, BookingRepository::class);
         $this->app->bind(BookingReadModelRepositoryInterface::class, BookingReadModelRepository::class);
+
+        // Sales repositories
+        $this->app->bind(SaleRepositoryInterface::class, SaleRepository::class);
 
         // Client repository
         $this->app->bind(ClientRepositoryInterface::class, ClientRepository::class);

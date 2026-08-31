@@ -1,0 +1,737 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    KANBAN CARD: SALES ORDER PROCESSING                    ║
+║          Penerapan DDD, Hexagonal Architecture, dan CQRS                   ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ BACKGROUND                                                               │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Saat ini, sistem sales memproses order dengan logika yang tersebar di berbagai 
+layer aplikasi, menyulitkan maintenance dan testing. Tidak ada pemisahan jelas 
+antara business logic, application orchestration, dan technical concerns.
+
+Tantangan:
+  • Business rules tercampur dengan database logic
+  • Query dan command tidak terpisah (N+1 queries, over-fetching data)
+  • Sulit untuk melakukan perubahan pada business logic tanpa meng-affect 
+    infrastructure layer
+  • Event handling untuk domain process belum ada (audit trail, notifications)
+
+Visi: Menerapkan DDD + Hexagonal + CQRS untuk memisahkan concerns dan membuat 
+sales domain lebih maintainable, testable, dan scalable.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ OBJECTIVE                                                                │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Membangun Sales Order Processing System yang:
+  ✓ Menggunakan DDD untuk model domain yang rich dan self-validating
+  ✓ Menggunakan Hexagonal Architecture untuk isolation dari infrastructure
+  ✓ Menggunakan CQRS untuk optimalisasi query dan event handling
+  ✓ Mengimplementasikan business logic sederhana: order creation → confirmation 
+    → completion dengan automatic commission calculation
+  ✓ Mendukung domain events untuk audit trail dan side effects
+
+Tujuan Pembelajaran:
+  • Memahami bagaimana DDD entities & value objects melindungi business rules
+  • Melihat bagaimana Hexagonal ports mengisolasi domain dari external systems
+  • Melihat bagaimana CQRS memisahkan write model (commands) dari read model 
+    (queries)
+  • Praktik event sourcing untuk state changes
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ FUNCTIONAL REQUIREMENTS                                                  │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ FR-001: DDD Domain Model - Sale Order Aggregate                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Membuat Sale Aggregate dengan value objects dan business rules   │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Tidak ada domain model untuk order processing                       │
+│   • Business rules tersebar di application layer                        │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Identifikasi Sale Aggregate root dengan:                           │
+│      - Entity: Sale (id, customer, items, status, total_amount)         │
+│      - Value Objects: SaleId (UUID), Money (amount, currency),          │
+│        LineItem (product_id, quantity, price), OrderStatus (enum)       │
+│   2. Implementasi ubiquitous language:                                  │
+│      - "createSale()" → menginisialisasi dengan status PENDING          │
+│      - "confirmSale()" → validasi stock, lock prices, set status CONFIRMED
+│      - "completeSale()" → mark as COMPLETED, trigger commission calc    │
+│      - "cancelSale()" → validasi status, trigger refund logic           │
+│   3. Implementasi business rules dalam domain:                          │
+│      - Minimum order amount: Rp 50.000                                   │
+│      - Maximum line items per order: 20                                 │
+│      - Only allowed status transitions: PENDING→CONFIRMED→COMPLETED     │
+│                                          └→ CANCELLED (dari PENDING)     │
+│   4. Validasi pada aggregate boundaries (throw domain exceptions)        │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Sale aggregate root yang self-validating                            │
+│   ✓ Business rules terlindungi dari external access                     │
+│   ✓ Type-safe value objects mencegah invalid state                      │
+│   ✓ Domain model dapat di-test tanpa infrastructure                     │
+│                                                                         │
+│ Business Logic Examples:                                                │
+│   - Validasi: Quantity > 0, Price > 0, Customer harus exist             │
+│   - Calculation: Total = SUM(LineItem.price * quantity)                 │
+│   - State Machine: Status transitions dengan business rules             │
+│                                                                         │
+│ Priority: MUST                                                          │
+│ Traces to: DDD Learning Goal #1                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ FR-002: Hexagonal Architecture - Port & Adapter Pattern                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Mengisolasi domain dari infrastructure melalui ports             │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Domain logic tergantung pada database queries (Eloquent)            │
+│   • Payment processing hardcoded ke 1 provider                          │
+│   • Sulit untuk test tanpa database dan external services               │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Definisikan Primary Ports (outbound dari domain):                  │
+│      - SaleRepositoryInterface                                          │
+│        └─ save(Sale): void                                              │
+│        └─ getById(SaleId): Sale                                         │
+│      - PaymentGatewayInterface                                          │
+│        └─ process(payment): PaymentResult                               │
+│      - CommissionServiceInterface                                       │
+│        └─ calculate(sale): Commission                                   │
+│   2. Implementasi Adapters (framework-specific):                        │
+│      - EloquentSaleRepository implements SaleRepositoryInterface        │
+│      - LaravelPaymentGatewayAdapter implements PaymentGatewayInterface  │
+│      - DatabaseCommissionService implements CommissionServiceInterface  │
+│   3. Konfigurasi Dependency Injection di container:                     │
+│      - Bind interfaces ke konkret implementations                       │
+│      - Mudah swap implementation (e.g., test mock vs production)         │
+│   4. Secondary Port (inbound):                                          │
+│      - REST API Controller sebagai adapter untuk HTTP                   │
+│      - Command handlers sebagai aplikasi entry points                   │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Domain tidak bergantung pada framework (Laravel, Eloquent)          │
+│   ✓ Infrastructure dapat ditest secara independen                       │
+│   ✓ Mudah mengganti payment provider, database, atau API               │
+│   ✓ Domain code 100% testable dengan mock repositories                  │
+│                                                                         │
+│ Architectural Benefit:                                                  │
+│   - Left side (Domain): Use cases & entities (framework-agnostic)        │
+│   - Right side (Infrastructure): Repositories & gateways (implementation)
+│   - Top side (API): REST Controllers & CLI commands (request adapters)   │
+│   - Bottom side (Database): Persistence layer (response adapters)        │
+│                                                                         │
+│ Priority: MUST                                                          │
+│ Traces to: Hexagonal Learning Goal #1                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ FR-003: CQRS - Separate Commands from Queries                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Memisahkan command model (write) dari query model (read)         │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Satu model untuk read dan write (tidak optimal)                     │
+│   • Complex queries dengan multiple joins dan N+1 problems              │
+│   • Aggregated data harus di-compute on-the-fly                         │
+│   • Real-time reports sulit dan lambat                                  │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Tentukan Command Side (Write Model):                               │
+│      Commands (input/intent):                                           │
+│        - CreateSaleCommand(customerId, items)                           │
+│        - ConfirmSaleCommand(saleId)                                     │
+│        - CompleteSaleCommand(saleId)                                    │
+│        - CancelSaleCommand(saleId, reason)                              │
+│      Handlers (orchestration):                                          │
+│        - CreateSaleHandler → validasi + create aggregate + save         │
+│        - ConfirmSaleHandler → retrieve + confirm + save + emit events   │
+│      Output: Domain events (SaleCreatedEvent, SaleConfirmedEvent, etc.)  │
+│                                                                         │
+│   2. Tentukan Query Side (Read Model):                                  │
+│      Queries (projection/read):                                         │
+│        - GetSaleByIdQuery(saleId) → detail order                        │
+│        - ListSalesQuery(customerId, status, page) → paginated orders    │
+│        - GetSalesReportQuery(period) → aggregated metrics               │
+│        - GetCommissionSummaryQuery(period) → commission report          │
+│      Handlers:                                                          │
+│        - Optimized for read performance (flat tables, denormalized)      │
+│        - Index on frequently queried fields                             │
+│      Data source: Read models atau materialized views                   │
+│                                                                         │
+│   3. Implementasi Event Projections:                                    │
+│      Ketika SaleConfirmedEvent emitted:                                 │
+│        → Update SalesListReadModel (aggregate cache)                    │
+│        → Update CustomerSalesCountReadModel                             │
+│        → Trigger CommissionCalculationProjection                        │
+│   4. Eventual Consistency:                                              │
+│      - Write happens immediately (command)                              │
+│      - Read model updates via event handlers (async/eventual)           │
+│      - Client might see stale data briefly (acceptable for reporting)    │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Command handlers fokus pada business logic & state changes          │
+│   ✓ Query handlers optimized untuk performance (no joins needed)         │
+│   ✓ Read models pre-computed, fast to serve to UI                       │
+│   ✓ Easy to scale read side independently                               │
+│   ✓ Audit trail via domain events                                       │
+│                                                                         │
+│ Business Logic in CQRS Context:                                         │
+│   - Commission Calculation:                                             │
+│     Event: SaleCompletedEvent                                           │
+│     Projection: IF sale.total > 1M THEN commission = 5% ELSE 3%         │
+│                 Store in CommissionReadModel for reporting               │
+│   - Sales Metrics:                                                      │
+│     Event: SaleConfirmedEvent                                           │
+│     Projection: Increment daily_sales_count, update revenue_total        │
+│                                                                         │
+│ Priority: MUST                                                          │
+│ Traces to: CQRS Learning Goal #1                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ FR-004: Domain Events & Event Handlers                                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Menggunakan domain events untuk menangani side effects            │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Side effects (emails, notifications, logs) ada di command handler    │
+│   • Tanpa event sourcing, sulit track perubahan state                    │
+│   • Multiple systems tidak tahu tentang perubahan domain                 │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Definisikan domain events dalam domain layer:                      │
+│      - SaleCreatedEvent(saleId, customerId, total, timestamp)           │
+│      - SaleConfirmedEvent(saleId, confirmedAt)                          │
+│      - SaleCompletedEvent(saleId, completedAt, commission)              │
+│      - SaleCancelledEvent(saleId, reason, cancelledAt)                  │
+│   2. Publikasikan events dari aggregate methods:                        │
+│      Sale.confirmSale() {                                               │
+│        this.status = OrderStatus::CONFIRMED                             │
+│        this.confirmedAt = now()                                         │
+│        this.recordEvent(new SaleConfirmedEvent($this->id))  ← publish   │
+│      }                                                                   │
+│   3. Register event subscribers/handlers:                               │
+│      - SendConfirmationEmailHandler → ketika SaleConfirmedEvent         │
+│      - UpdateSalesMetricsHandler → ketika SaleCompletedEvent            │
+│      - CalculateCommissionHandler → ketika SaleCompletedEvent           │
+│      - LogAuditTrailHandler → untuk semua events                        │
+│   4. Implement event bus untuk dispatch:                                │
+│      - Sync atau async dispatch (dapat di-configure)                    │
+│      - Retry mechanism untuk failed handlers                            │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Clear audit trail dari semua state changes                          │
+│   ✓ Side effects decoupled dari command handlers                        │
+│   ✓ Mudah add new behaviors (e.g., new event handler) tanpa modify code │
+│   ✓ Event-driven architecture enables async processing                  │
+│                                                                         │
+│ Priority: SHOULD                                                        │
+│ Traces to: CQRS & DDD Learning Goal #2                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ACCEPTANCE CRITERIA                                                      │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ AC-001: Sale Domain Model Implemented                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: DDD Domain Model dengan Entities, Value Objects, dan Business    │
+│ Rules yang terlindungi                                                  │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Codebase belum memiliki Sale aggregate dengan business logic        │
+│   • Business rules tersebar di berbagai layer                           │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Create Sale entity dengan private properties:                      │
+│      - $id: SaleId (value object)                                       │
+│      - $customerId: CustomerId (value object)                           │
+│      - $lineItems: array of LineItem value objects                      │
+│      - $status: OrderStatus enum                                        │
+│      - $totalAmount: Money value object                                 │
+│      - $createdAt: DateTimeImmutable                                    │
+│                                                                         │
+│   2. Create value objects:                                              │
+│      - SaleId(string $uuid) with validation                             │
+│      - LineItem(productId, quantity, price) with price validation       │
+│      - Money(amount, currency) with arithmetic operations               │
+│      - OrderStatus enum: PENDING, CONFIRMED, COMPLETED, CANCELLED       │
+│                                                                         │
+│   3. Implement factory methods:                                         │
+│      Sale::create(CustomerId $id, LineItem[] $items): Sale              │
+│      ├─ Validate $items is not empty                                    │
+│      ├─ Validate each LineItem quantity > 0                             │
+│      ├─ Calculate totalAmount                                           │
+│      ├─ Validate totalAmount >= 50000 (minimum)                         │
+│      └─ Return new Sale with PENDING status                             │
+│                                                                         │
+│   4. Implement state transition methods:                                │
+│      Sale::confirm(): void                                              │
+│      ├─ Throw exception if status !== PENDING                           │
+│      ├─ Record SaleConfirmedEvent                                       │
+│      └─ Set status = CONFIRMED                                          │
+│                                                                         │
+│      Sale::complete(): void                                             │
+│      ├─ Throw exception if status !== CONFIRMED                         │
+│      ├─ Record SaleCompletedEvent                                       │
+│      └─ Set status = COMPLETED                                          │
+│                                                                         │
+│      Sale::cancel(string $reason): void                                 │
+│      ├─ Throw exception if status not in [PENDING, CONFIRMED]           │
+│      ├─ Record SaleCancelledEvent($reason)                              │
+│      └─ Set status = CANCELLED                                          │
+│                                                                         │
+│   5. Implement query methods:                                           │
+│      - getId(): SaleId                                                  │
+│      - getCustomerId(): CustomerId                                      │
+│      - getLineItems(): LineItem[]                                       │
+│      - getTotalAmount(): Money                                          │
+│      - getStatus(): OrderStatus                                         │
+│      - isCompleted(): bool                                              │
+│      - isCancellable(): bool                                            │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Test case: Sale::create() dengan valid data → Sale created          │
+│   ✓ Test case: Sale::create() minimum 50K → throws exception if < 50K   │
+│   ✓ Test case: Sale::confirm() → status berubah ke CONFIRMED, event      │
+│               recorded                                                   │
+│   ✓ Test case: Sale::confirm() dari COMPLETED → throws exception        │
+│   ✓ Test case: Sale::cancel() dari PENDING → status berubah ke CANCELLED│
+│   ✓ Test case: Money calculations adalah accurate                       │
+│   ✓ Domain model dapat di-test tanpa database atau HTTP                 │
+│   ✓ Business rules tidak dapat di-bypass dari outside aggregate         │
+│                                                                         │
+│ Passed When:                                                            │
+│   • Semua unit tests untuk Sale aggregate pass                          │
+│   • Tidak ada public methods untuk modify state selain defined methods   │
+│   • Semua business rules enforced di domain layer                       │
+│                                                                         │
+│ Priority: MUST                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ AC-002: Hexagonal Ports & Adapters Implemented                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Domain terisolasi dari infrastructure via ports                  │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Domain tergantung pada Eloquent models                              │
+│   • Payment processing hardcoded                                        │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Create port interfaces di domain layer:                            │
+│      Src/Sales/Domain/Repositories/SaleRepositoryInterface              │
+│      ├─ save(Sale $sale): void                                          │
+│      ├─ getById(SaleId $id): Sale (throws SaleNotFoundException)        │
+│      └─ list(SalesFilter $filter): Sale[]                              │
+│                                                                         │
+│      Src/Sales/Domain/Services/PaymentGatewayInterface                  │
+│      ├─ process(PaymentRequest $req): PaymentResult                     │
+│      └─ refund(string $transactionId): void                             │
+│                                                                         │
+│      Src/Sales/Domain/Services/CommissionCalculatorInterface            │
+│      └─ calculate(Sale $sale): Commission                               │
+│                                                                         │
+│   2. Create adapters di infrastructure layer:                           │
+│      Src/Sales/Infrastructure/Persistence/EloquentSaleRepository        │
+│      ├─ Extends SaleRepositoryInterface                                 │
+│      ├─ Uses SaleModel (Eloquent)                                       │
+│      ├─ Implements mapper: Sale ↔ SaleModel                             │
+│      └─ All queries done here, not in domain                            │
+│                                                                         │
+│      Src/Sales/Infrastructure/Services/LaravelPaymentGateway            │
+│      ├─ Extends PaymentGatewayInterface                                 │
+│      ├─ Uses external payment API (e.g., Stripe, BCA)                   │
+│      └─ Maps domain PaymentRequest to API format                        │
+│                                                                         │
+│   3. Configure dependency injection:                                    │
+│      App/Providers/SalesServiceProvider.php                             │
+│      ├─ $this->app->bind(                                               │
+│      │   SaleRepositoryInterface::class,                                │
+│      │   EloquentSaleRepository::class                                  │
+│      │ )                                                                │
+│      └─ Similar for PaymentGateway, CommissionCalculator                │
+│                                                                         │
+│   4. Use ports in application layer:                                    │
+│      Src/Sales/Application/Commands/CreateSaleHandler                   │
+│      ├─ Constructor injection of SaleRepositoryInterface                │
+│      ├─ No direct Eloquent usage                                        │
+│      └─ Uses repository methods only                                    │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Domain/Entities/Sale.php has 0 imports from Laravel/Eloquent        │
+│   ✓ Domain/Services/* interfaces have no implementation details         │
+│   ✓ Can swap repository implementation (Test mock vs Eloquent)          │
+│   ✓ Can test handlers with mock repositories                           │
+│   ✓ API controllers use command bus, not domain directly                │
+│                                                                         │
+│ Passed When:                                                            │
+│   • grep -r "use Illuminate" Src/Sales/Domain/ returns nothing          │
+│   • All domain service dependencies are via interfaces                  │
+│   • Integration tests pass with mocked payment gateway                  │
+│   • Can run domain tests without database setup                         │
+│                                                                         │
+│ Priority: MUST                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ AC-003: CQRS Command & Query Separation                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Commands untuk write, Queries untuk read—distinct models & data  │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Single model used for read & write                                  │
+│   • Complex eager loading queries in controllers                        │
+│   • No read model optimization                                          │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Implement command side (write):                                    │
+│      Src/Sales/Application/Commands/                                    │
+│      ├─ CreateSaleCommand(customerId, items[])                          │
+│      ├─ ConfirmSaleCommand(saleId)                                      │
+│      ├─ CompleteSaleCommand(saleId)                                     │
+│      └─ CancelSaleCommand(saleId, reason)                               │
+│                                                                         │
+│      Src/Sales/Application/Handlers/                                    │
+│      ├─ CreateSaleHandler                                               │
+│      │  ├─ Receive command                                              │
+│      │  ├─ Create Sale aggregate via Sale::create()                     │
+│      │  ├─ Call $repository->save($sale)                                │
+│      │  └─ Dispatch domain events                                       │
+│      ├─ ConfirmSaleHandler                                              │
+│      │  ├─ Retrieve Sale from repository                                │
+│      │  ├─ Call $sale->confirm()                                        │
+│      │  ├─ Validate business constraints (payment received)             │
+│      │  └─ Save & dispatch events                                       │
+│      └─ etc.                                                            │
+│                                                                         │
+│   2. Implement query side (read):                                       │
+│      Src/Sales/Application/Queries/                                     │
+│      ├─ GetSaleByIdQuery(saleId)                                        │
+│      ├─ ListSalesQuery(customerId, filters)                             │
+│      ├─ GetSalesReportQuery(startDate, endDate)                         │
+│      └─ GetCommissionSummaryQuery(period, agentId)                      │
+│                                                                         │
+│      Src/Sales/Application/Handlers/                                    │
+│      ├─ GetSaleByIdHandler → direct DB query, no joins                  │
+│      ├─ ListSalesHandler → from read model table                        │
+│      ├─ GetSalesReportHandler → from materialized view or cache         │
+│      └─ GetCommissionSummaryHandler → from commission read model        │
+│                                                                         │
+│   3. Create read models (denormalized data):                            │
+│      Src/Sales/Domain/ReadModels/                                       │
+│      ├─ SaleListItemRM (id, customer_name, status, total, created_at)   │
+│      ├─ SalesReportRM (daily_sales, daily_revenue, daily_count)         │
+│      └─ CommissionReportRM (agent_id, total_commission, period)         │
+│                                                                         │
+│   4. Implement projections (event subscribers):                         │
+│      When SaleCreatedEvent is published:                                │
+│      ├─ Create SaleListItemRM entry                                     │
+│      └─ Increment customer_sale_count                                   │
+│                                                                         │
+│      When SaleConfirmedEvent is published:                              │
+│      ├─ Update SaleListItemRM.status → CONFIRMED                        │
+│      └─ Trigger commission calculation                                  │
+│                                                                         │
+│      When SaleCompletedEvent is published:                              │
+│      ├─ Update SalesReportRM (increment daily_revenue, count)           │
+│      ├─ Calculate & store commission in CommissionReportRM              │
+│      └─ Update agent_total_commission                                   │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Commands are fire-and-forget, return void or event                  │
+│   ✓ Queries return read-model objects, NO entity objects                │
+│   ✓ Read models are flat tables, optimized for queries                  │
+│   ✓ No N+1 queries from read handlers                                   │
+│   ✓ Queries are fast (direct table scans, indexed columns)              │
+│                                                                         │
+│ Test Scenarios:                                                         │
+│   • Test: CreateSaleCommand → reads confirmation email sent → checks     │
+│           SaleListItemRM created                                        │
+│   • Test: ConfirmSaleCommand → checks SaleListItemRM.status updated     │
+│   • Test: GetSalesReportQuery → returns aggregated data without joins   │
+│   • Test: GetCommissionSummaryQuery → reads from cache if available      │
+│                                                                         │
+│ Passed When:                                                            │
+│   • All commands handled without returning data                         │
+│   • All queries return read-model DTOs, not entities                    │
+│   • Read model projections are up-to-date after each command            │
+│   • Query response time < 100ms for list queries                        │
+│                                                                         │
+│ Priority: MUST                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ AC-004: Domain Events & Audit Trail                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Judul: Semua state changes tercatat sebagai domain events dengan audit  │
+│ trail                                                                   │
+│                                                                         │
+│ Kondisi Awal:                                                          │
+│   • Side effects ada di command handlers (tight coupling)               │
+│   • Tidak ada audit trail untuk perubahan state                         │
+│   • Hard to replay business logic                                       │
+│                                                                         │
+│ Tindakan:                                                               │
+│   1. Define domain events dalam Src/Sales/Domain/Events/:               │
+│      ├─ SaleCreatedEvent(saleId, customerId, items, total, createdAt)   │
+│      ├─ SaleConfirmedEvent(saleId, confirmedAt)                         │
+│      ├─ SaleCompletedEvent(saleId, completedAt, commission)             │
+│      ├─ SaleCancelledEvent(saleId, reason, cancelledAt)                 │
+│      └─ CommissionCalculatedEvent(saleId, amount, percentage)           │
+│                                                                         │
+│   2. Record events in aggregate:                                        │
+│      class Sale {                                                       │
+│        private array $recordedEvents = [];                              │
+│                                                                         │
+│        public static function create(...) {                             │
+│          $sale = new self();                                            │
+│          $sale->recordEvent(new SaleCreatedEvent(...));  ← record       │
+│          return $sale;                                                  │
+│        }                                                                │
+│                                                                         │
+│        public function confirm() {                                      │
+│          if ($this->status !== OrderStatus::PENDING) {                  │
+│            throw new InvalidStateException(...);                        │
+│          }                                                              │
+│          $this->status = OrderStatus::CONFIRMED;                        │
+│          $this->recordEvent(new SaleConfirmedEvent(...));  ← record     │
+│        }                                                                │
+│      }                                                                   │
+│                                                                         │
+│   3. Publish events from repository:                                    │
+│      class EloquentSaleRepository {                                     │
+│        public function save(Sale $sale): void {                         │
+│          $this->saveModel($sale);  // persist to DB                     │
+│          foreach ($sale->getRecordedEvents() as $event) {               │
+│            $this->eventBus->publish($event);  ← publish                 │
+│          }                                                              │
+│        }                                                                │
+│      }                                                                   │
+│                                                                         │
+│   4. Register event subscribers:                                        │
+│      - SendConfirmationEmailSubscriber                                  │
+│        └─ Listens to: SaleConfirmedEvent                                │
+│        └─ Action: Send "Your order #123 is confirmed" email             │
+│                                                                         │
+│      - UpdateSalesMetricsSubscriber                                     │
+│        └─ Listens to: SaleCompletedEvent                                │
+│        └─ Action: Increment daily_sales_count, update revenue_total     │
+│                                                                         │
+│      - CalculateCommissionSubscriber                                    │
+│        └─ Listens to: SaleCompletedEvent                                │
+│        └─ Action: Calculate commission based on sale amount & agent tier│
+│        └─ Publishes: CommissionCalculatedEvent                          │
+│                                                                         │
+│      - LogAuditTrailSubscriber                                          │
+│        └─ Listens to: All events                                        │
+│        └─ Action: Log event to audit_events table (what, who, when)      │
+│                                                                         │
+│   5. Implement event store (optional but recommended):                  │
+│      Table: domain_events                                               │
+│      ├─ id (UUID)                                                       │
+│      ├─ aggregate_id (SaleId)                                           │
+│      ├─ event_type (SaleCreatedEvent, etc.)                             │
+│      ├─ event_data (JSON with all event properties)                     │
+│      ├─ occurred_at (when domain event happened)                        │
+│      └─ recorded_at (when recorded in DB)                               │
+│                                                                         │
+│ Hasil:                                                                   │
+│   ✓ Event is published when Sale.confirm() called                       │
+│   ✓ All subscribers receive event and execute independently             │
+│   ✓ Email sent asynchronously (don't block command response)            │
+│   ✓ Commission calculated automatically                                 │
+│   ✓ Audit log shows: [2026-01-15 14:23:45] Sale #123 confirmed by user  │
+│   ✓ Can replay events to rebuild Sale state (event sourcing)            │
+│                                                                         │
+│ Test Scenarios:                                                         │
+│   • Test: CreateSaleHandler → SaleCreatedEvent published → check if in  │
+│           domain_events table                                           │
+│   • Test: ConfirmSaleHandler → SaleConfirmedEvent published → verify    │
+│           email handler was called (mock event bus)                     │
+│   • Test: Audit trail contains all events with correct timestamps       │
+│   • Test: Event has required fields (id, aggregate_id, type, data)      │
+│                                                                         │
+│ Passed When:                                                            │
+│   • All domain events recorded in domain_events table after command      │
+│   • Event subscribers are decoupled (can add/remove without code change)│
+│   • Audit trail is queryable and complete                               │
+│   • All side effects happen via event subscribers, not in handlers      │
+│                                                                         │
+│ Priority: SHOULD                                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ BUSINESS LOGIC DEEP DIVE                                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Contoh business logic sederhana yang diimplementasikan dalam sales domain:
+
+1. **ORDER CREATION & VALIDATION**
+   ─────────────────────────────────
+   When: CreateSaleCommand(customerId, items[])
+   
+   Rules:
+   • Customer harus exist (query customer via CustomerId)
+   • Setiap item quantity > 0
+   • Setiap item price > 0
+   • Total = SUM(item.price × quantity) harus ≥ Rp 50.000 (minimum order)
+   • Maksimal 20 line items per order
+   
+   Result:
+   • Sale aggregate created dengan status PENDING
+   • SaleCreatedEvent recorded
+   • No payment taken yet (just record intent)
+
+2. **ORDER CONFIRMATION & PAYMENT**
+   ────────────────────────────────
+   When: ConfirmSaleCommand(saleId)
+   
+   Rules (per business policy):
+   • Status harus PENDING (tidak boleh double-confirm)
+   • Stock check: semua items tersedia di inventory (hypothetical)
+   • Lock harga: simpan actual price di sale (price tidak boleh berubah)
+   • Process payment via PaymentGatewayInterface
+     └─ IF payment success → status = CONFIRMED
+     └─ IF payment fails → throw PaymentFailedException, stay PENDING
+   
+   Result:
+   • Sale status berubah PENDING → CONFIRMED
+   • Payment captured
+   • SaleConfirmedEvent recorded dengan payment_id
+   • Customer email dikirim: "Pesanan Anda telah dikonfirmasi"
+
+3. **ORDER COMPLETION & COMMISSION**
+   ─────────────────────────────────
+   When: CompleteSaleCommand(saleId) — typically triggered after delivery
+   
+   Rules:
+   • Status harus CONFIRMED (only complete confirmed orders)
+   • Calculate commission based on:
+     └─ IF total amount > Rp 1.000.000 → 5% commission
+     └─ ELSE IF total amount > Rp 500.000 → 3% commission
+     └─ ELSE → 1% commission
+   
+   Commission calculation example:
+   • Sale amount: Rp 750.000
+   • Commission rate: 3%
+   • Commission amount: Rp 22.500
+   
+   Result:
+   • Sale status berubah CONFIRMED → COMPLETED
+   • Commission amount calculated dan stored
+   • SaleCompletedEvent recorded dengan commission
+   • Metrics updated: daily_sales_total, daily_sales_count, agent_commission
+   • Notification sent to agent: "Anda mendapatkan komisi Rp 22.500 untuk order #123"
+
+4. **ORDER CANCELLATION**
+   ─────────────────────
+   When: CancelSaleCommand(saleId, reason)
+   
+   Rules:
+   • Hanya bisa cancel dari status PENDING atau CONFIRMED
+   • Jika CONFIRMED: refund payment (via PaymentGateway.refund())
+   • Jika PENDING: nothing to refund
+   • Store cancellation reason untuk audit
+   
+   Result:
+   • Sale status → CANCELLED
+   • SaleCancelledEvent recorded dengan reason
+   • Payment refunded if applicable
+   • Customer notified
+
+5. **COMMISSION DISTRIBUTION**
+   ──────────────────────────
+   When: CommissionCalculatedEvent fired (after SaleCompletedEvent)
+   
+   Rules (hypothetical agent system):
+   • Commission belongs to agent who created the order
+   • Commission is "earned" on completion (not on confirmation)
+   • Commission can be withdrawn monthly
+   • Track commission per agent in CommissionReportRM
+   
+   Result:
+   • Agent.totalCommission += calculated commission
+   • CommissionReportRM updated
+   • Agent can see in dashboard: "Total komisi bulan ini: Rp 500.000"
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ARCHITECTURAL FLOW DIAGRAM                                               │
+└──────────────────────────────────────────────────────────────────────────┘
+
+User Request (REST API)
+    ↓
+[HTTP Controller] - Adapter (Secondary Port)
+    ↓
+[Application Layer]
+    ├─ CreateSaleHandler receives CreateSaleCommand
+    ├─ Calls domain methods
+    └─ Coordinates with infrastructure
+    ↓
+[Domain Layer] - Pure Business Logic (Framework-agnostic)
+    ├─ Sale Aggregate
+    │  ├─ Entities: Sale, LineItem
+    │  └─ Value Objects: SaleId, Money, OrderStatus
+    ├─ Domain Services (Interfaces only)
+    │  ├─ SaleRepositoryInterface
+    │  ├─ PaymentGatewayInterface
+    │  └─ CommissionCalculatorInterface
+    └─ Domain Events
+       ├─ SaleCreatedEvent
+       ├─ SaleConfirmedEvent
+       ├─ SaleCompletedEvent
+       └─ SaleCancelledEvent
+    ↓
+[Infrastructure Layer] - Adapters (Primary Port)
+    ├─ EloquentSaleRepository implements SaleRepositoryInterface
+    ├─ LaravelPaymentGateway implements PaymentGatewayInterface
+    ├─ DatabaseCommissionService implements CommissionCalculatorInterface
+    └─ [Database] - Persistence
+    ↓
+[Event Bus & Subscribers]
+    ├─ SendEmailSubscriber → listens to SaleConfirmedEvent
+    ├─ UpdateMetricsSubscriber → listens to SaleCompletedEvent
+    ├─ CalculateCommissionSubscriber → listens to SaleCompletedEvent
+    └─ LogAuditTrailSubscriber → listens to all events
+    ↓
+[Read Models / Projections]
+    ├─ SaleListItemRM (for GetSalesListQuery)
+    ├─ SalesReportRM (for GetSalesReportQuery)
+    ├─ CommissionReportRM (for GetCommissionReportQuery)
+    └─ [Database] - Read Model Tables
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ KEY LEARNINGS                                                            │
+└──────────────────────────────────────────────────────────────────────────┘
+
+✓ DDD - Domain Entities & Value Objects encapsulate business rules
+  └─ Impossible to create invalid Sales (validation in constructor)
+  └─ Type-safe with value objects (Money, SaleId) vs primitive types
+
+✓ Hexagonal - Ports & Adapters isolate domain from infrastructure
+  └─ Domain doesn't know about Laravel, Eloquent, or HTTP
+  └─ Can test domain with mock repositories without database
+
+✓ CQRS - Separate commands (write) from queries (read)
+  └─ Commands orchestrate state changes, don't return data
+  └─ Queries read from optimized read models (fast, no joins)
+  └─ Projections keep read models synchronized with write model
+
+✓ Events - Audit trail & decoupled side effects
+  └─ Every state change is recorded as a domain event
+  └─ Event handlers manage side effects (email, notifications, metrics)
+  └─ Easy to extend with new behaviors (add new event subscriber)
+
+✓ Ubiquitous Language - Business terms in code
+  └─ "Sale", "LineItem", "OrderStatus", "confirm", "complete"
+  └─ Developers and stakeholders speak the same language
+
+
