@@ -10,9 +10,11 @@ final class CreateCustomerTest extends TestCase
 {
     public function test_it_can_create_customer(): void
     {
+        $email = 'john-'.uniqid('', true).'@example.com';
+
         $response = $this->postJson('/api/customers', [
             'name' => 'John Doe',
-            'email' => 'john@example.com',
+            'email' => $email,
             'phone' => '081234567890',
         ]);
 

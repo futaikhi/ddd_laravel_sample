@@ -9,8 +9,6 @@ final readonly class LineItemInputDto
     public function __construct(
         public string $productId,
         public int $quantity,
-        public int $unitPrice,
-        public string $currency = 'IDR',
     ) {
     }
 }

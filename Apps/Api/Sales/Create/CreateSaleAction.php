@@ -19,14 +19,25 @@ final readonly class CreateSaleAction
 
     public function __invoke(CreateSaleDto $dto): SaleCreatedRes
     {
-        $lineItems = array_map(
-            static fn (LineItemInputDto $item): LineItem => new LineItem(
+        $customer = \App\Models\Customer::query()->find($dto->customerId->getValue());
+
+        if ($customer === null) {
+            throw new \RuntimeException('Customer does not exist.');
+        }
+
+        $lineItems = array_map(function (LineItemInputDto $item): LineItem {
+            $product = \App\Models\Product::query()->find($item->productId);
+
+            if ($product === null) {
+                throw new \RuntimeException('Product does not exist: '.$item->productId);
+            }
+
+            return new LineItem(
                 productId: $item->productId,
                 quantity: $item->quantity,
-                unitPrice: new Money($item->unitPrice, $item->currency),
-            ),
-            $dto->lineItems,
-        );
+                unitPrice: new Money((int) $product->price, (string) $product->currency),
+            );
+        }, $dto->lineItems);
 
         $this->commandBus->dispatch(new CreateSaleCommand(
             id: $dto->id,

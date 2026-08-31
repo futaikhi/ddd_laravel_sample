@@ -21,8 +21,6 @@ final class CreateSaleRequest extends AbstractFormRequest
             $lineItems[] = new LineItemInputDto(
                 productId: (string) ($item['product_id'] ?? ''),
                 quantity: (int) ($item['quantity'] ?? 0),
-                unitPrice: (int) ($item['unit_price'] ?? 0),
-                currency: (string) ($item['currency'] ?? 'IDR'),
             );
         }
 
