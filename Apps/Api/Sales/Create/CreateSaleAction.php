@@ -8,6 +8,7 @@ use Apps\Api\Sales\Shared\SaleCreatedRes;
 use Src\Sales\Application\Commands\Create\CreateSaleCommand;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
+use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandBusInterface;
 
 final readonly class CreateSaleAction
@@ -33,7 +34,7 @@ final readonly class CreateSaleAction
             }
 
             return new LineItem(
-                productId: $item->productId,
+                productId: ProductId::fromString($item->productId),
                 quantity: $item->quantity,
                 unitPrice: new Money((int) $product->price, (string) $product->currency),
             );

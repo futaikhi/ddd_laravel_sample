@@ -9,11 +9,11 @@ use InvalidArgumentException;
 final readonly class LineItem
 {
     public function __construct(
-        public string $productId,
+        public ProductId $productId,
         public int $quantity,
         public Money $unitPrice,
     ) {
-        if ($this->productId === '') {
+        if ($this->productId->getValue() === '') {
             throw new InvalidArgumentException('Product ID cannot be empty');
         }
 

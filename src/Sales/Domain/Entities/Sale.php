@@ -34,6 +34,7 @@ final class Sale extends BaseEntity
         private array $lineItems,
         private OrderStatus $status,
         private Money $totalAmount,
+        private readonly DateTimeImmutable $createdAt,
         private ?DateTimeImmutable $confirmedAt = null,
         private ?DateTimeImmutable $cancelledAt = null,
         private ?string $cancellationReason = null,
@@ -69,6 +70,7 @@ final class Sale extends BaseEntity
             lineItems: $lineItems,
             status: OrderStatus::PENDING,
             totalAmount: $total,
+            createdAt: new DateTimeImmutable(),
         );
 
         $sale->recordLast(SaleCreatedEvent::fromEntity($sale));
@@ -85,6 +87,7 @@ final class Sale extends BaseEntity
         array $lineItems,
         OrderStatus $status,
         Money $totalAmount,
+        ?DateTimeImmutable $createdAt = null,
         ?DateTimeImmutable $confirmedAt = null,
         ?DateTimeImmutable $cancelledAt = null,
         ?string $cancellationReason = null,
@@ -96,6 +99,7 @@ final class Sale extends BaseEntity
             lineItems: $lineItems,
             status: $status,
             totalAmount: $totalAmount,
+            createdAt: $createdAt ?? new DateTimeImmutable(),
             confirmedAt: $confirmedAt,
             cancelledAt: $cancelledAt,
             cancellationReason: $cancellationReason,
@@ -172,6 +176,11 @@ final class Sale extends BaseEntity
     public function getStatus(): OrderStatus
     {
         return $this->status;
+    }
+
+    public function getCreatedAt(): DateTimeImmutable
+    {
+        return $this->createdAt;
     }
 
     public function getConfirmedAt(): ?DateTimeImmutable

@@ -14,6 +14,7 @@ use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
+use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
 
 final class SaleTest extends TestCase
@@ -24,8 +25,8 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(25000, 'IDR')),
-                new LineItem('prod-2', 1, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5A'), 2, Money::fromCents(25000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5B'), 1, Money::fromCents(30000, 'IDR')),
             ],
         );
 
@@ -42,7 +43,7 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 1, Money::fromCents(20000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5C'), 1, Money::fromCents(20000, 'IDR')),
             ],
         );
     }
@@ -53,7 +54,7 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
             ],
         );
 
@@ -71,7 +72,7 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
             ],
         );
 
@@ -86,7 +87,7 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
             ],
         );
 
@@ -104,7 +105,7 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
             ],
         );
 
@@ -117,7 +118,7 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
             ],
         );
 
@@ -135,11 +136,25 @@ final class SaleTest extends TestCase
             SaleId::random(),
             CustomerId::random(),
             [
-                new LineItem('prod-1', 2, Money::fromCents(30000, 'IDR')),
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
             ],
         );
 
         $sale->cancel('first cancellation');
         $sale->cancel('second cancellation');
+    }
+
+    public function test_it_tracks_created_at_on_creation(): void
+    {
+        $sale = Sale::create(
+            SaleId::random(),
+            CustomerId::random(),
+            [
+                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
+            ],
+        );
+
+        $this->assertInstanceOf(\DateTimeImmutable::class, $sale->getCreatedAt());
+        $this->assertNotNull($sale->getCreatedAt());
     }
 }

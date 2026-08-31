@@ -45,4 +45,6 @@ Route::prefix('products')->group(function () {
 Route::prefix('sales')->group(function () {
     Route::post('/', [SalesController::class, 'create']);
     Route::post('/{id}/confirm', [SalesController::class, 'confirm']);
+    Route::post('/{id}/cancel', [SalesController::class, 'cancel']);
+    Route::post('/{id}/complete', [SalesController::class, 'complete']);
 });
