@@ -30,7 +30,7 @@
 | `404`  | Sale not found |
 | `409`  | Invalid state transition (e.g. confirm an already-confirmed sale) |
 | `422`  | Request payload semantically invalid (missing field, unknown enum, bad ULID, …) |
-| `502`  | Payment gateway unreachable / errored |
+| `502`  | Unexpected payment validation adapter error |
 
 Error envelope: `{ "error": "<slug>", "message": "<human message>" }`
 
@@ -110,9 +110,7 @@ curl -X POST http://localhost:8000/api/sales/$SALE_ID/confirm \
 # → 200 { "message": "Sale confirmed successfully" }
 ```
 
-Under the hood: `ConfirmSaleHandler` calls `PaymentGatewayInterface::process()`. In `testing`
-env it's a `MockPaymentGatewayAdapter` (always succeeds); in production it's
-`LaravelPaymentGatewayAdapter`. The returned `transactionId` is locked into the aggregate.
+Under the hood: `ConfirmSaleHandler` calls `PaymentGatewayInterface::process()`. There is no real external payment gateway in this sample project. In `testing`, the port is implemented by `MockPaymentGatewayAdapter`; in other environments it uses `LaravelPaymentGatewayAdapter`, which only validates the request locally and returns a local transaction id. The returned `transactionId` is locked into the aggregate.
 
 ### Step 3 · Complete Sale (→ COMPLETED, commission calculated)
 
@@ -226,7 +224,7 @@ curl -X POST http://localhost:8000/api/sales/$SALE_ID/cancel \
   -d '{ "reason": "Customer requested cancellation" }'
 ```
 
-Allowed only from `PENDING` or `CONFIRMED`. Cancelling a `COMPLETED` or `CANCELLED` sale
+Allowed only from `PENDING`. Cancelling a `CONFIRMED`, `COMPLETED`, or `CANCELLED` sale
 returns `409 Conflict`.
 
 ---
@@ -254,7 +252,7 @@ returns `409 Conflict`.
 ### 502 — Payment gateway unavailable
 
 ```json
-{ "error": "payment_gateway_error", "message": "Payment gateway error: cURL error 28" }
+{ "error": "payment_gateway_error", "message": "Payment validation error: unexpected adapter failure" }
 ```
 
 ---
@@ -262,8 +260,8 @@ returns `409 Conflict`.
 ## Testing Tips
 
 - **Testing environment** wires `MockPaymentGatewayAdapter` and `MockCommissionService` in
-  `AppServiceProvider::registerSalesAdapters()`, so integration tests don't hit any external
-  service.
+  `AppServiceProvider::registerSalesAdapters()`, so tests stay deterministic and do not require
+  any external service.
 - To simulate payment failure in a feature test:
   ```php
   $mock = app(PaymentGatewayInterface::class); // MockPaymentGatewayAdapter

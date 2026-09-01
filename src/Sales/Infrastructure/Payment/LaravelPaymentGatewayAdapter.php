@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Src\Sales\Infrastructure\Payment;
 
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Src\Sales\Domain\Ports\PaymentFailedException;
 use Src\Sales\Domain\Ports\PaymentGatewayException;
@@ -12,22 +11,19 @@ use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\ValueObjects\PaymentRequest;
 use Src\Sales\Domain\ValueObjects\PaymentResult;
 
+/**
+ * Local Laravel payment adapter.
+ *
+ * This sample project does not integrate with a real third-party payment
+ * gateway. The adapter still implements PaymentGatewayInterface to keep the
+ * hexagonal boundary explicit, but its responsibility is only to validate
+ * the payment request that came from the application flow and return a local
+ * transaction id.
+ */
 final class LaravelPaymentGatewayAdapter implements PaymentGatewayInterface
 {
-    private string $apiBaseUrl;
-    private string $apiKey;
-
-    public function __construct()
-    {
-        $url = config('services.payment.url');
-        $this->apiBaseUrl = is_string($url) ? $url : 'https://api.payment.example.com';
-        
-        $key = config('services.payment.key');
-        $this->apiKey = is_string($key) ? $key : '';
-    }
-
     /**
-     * Process a payment request via external payment gateway
+     * Validate the payment request and return a local success result.
      *
      * @throws PaymentFailedException
      * @throws PaymentGatewayException
@@ -35,69 +31,45 @@ final class LaravelPaymentGatewayAdapter implements PaymentGatewayInterface
     public function process(PaymentRequest $request): PaymentResult
     {
         try {
-            Log::info('Processing payment', [
-                'sale_id' => $request->getSaleId(),
-                'amount' => $request->getAmount()->getValue(),
-            ]);
+            $amount = $request->getAmount()->getValue();
 
-            // Build payment request for external gateway
-            $payload = [
-                'transaction_id' => $request->getSaleId(),
-                'amount' => $request->getAmount()->getValue(),
-                'currency' => $request->getCurrency(),
-                'description' => $request->getDescription(),
-            ];
-
-            // Call external payment gateway
-            $response = Http::withHeaders([
-                'Authorization' => "Bearer {$this->apiKey}",
-                'Accept' => 'application/json',
-            ])
-                ->timeout(10)
-                ->post("{$this->apiBaseUrl}/payments", $payload);
-
-            // Parse response
-            if ($response->failed()) {
-                $jsonResponse = $response->json();
-                $message = $this->extractString($jsonResponse, 'message', 'Payment failed');
-                Log::warning('Payment failed', ['response' => $jsonResponse]);
-
-                throw PaymentFailedException::withMessage($message);
+            if ($request->getSaleId() === '') {
+                throw PaymentGatewayException::withMessage('Payment request sale id is required');
             }
 
-            $data = $response->json();
+            if ($amount <= 0) {
+                throw PaymentFailedException::withMessage('Payment amount must be greater than zero');
+            }
 
-            $transactionId = $this->extractString($data, 'id', $request->getSaleId());
-            $message = $this->extractString($data, 'message', 'Payment processed successfully');
+            if ($request->getCurrency() === '') {
+                throw PaymentFailedException::withMessage('Payment currency is required');
+            }
+
+            $transactionId = 'LOCAL-' . $request->getSaleId();
+
+            Log::info('Local payment request validated', [
+                'sale_id'        => $request->getSaleId(),
+                'amount'         => $amount,
+                'currency'       => $request->getCurrency(),
+                'transaction_id' => $transactionId,
+            ]);
 
             return PaymentResult::success(
-                $transactionId,
-                $request->getAmount(),
-                $message
+                transactionId: $transactionId,
+                amount: $request->getAmount(),
+                message: 'Local payment validation successful',
             );
-        } catch (PaymentFailedException $e) {
+        } catch (PaymentFailedException|PaymentGatewayException $e) {
             throw $e;
-        } catch (\Exception $e) {
-            Log::error('Payment gateway error', [
-                'error' => $e->getMessage(),
+        } catch (\Throwable $e) {
+            Log::error('Local payment validation error', [
+                'error'   => $e->getMessage(),
                 'sale_id' => $request->getSaleId(),
             ]);
 
             throw PaymentGatewayException::withMessage(
-                "Payment gateway error: {$e->getMessage()}"
+                "Payment validation error: {$e->getMessage()}",
             );
         }
-    }
-
-    /**
-     * Safely extract a string value from a mixed array response
-     */
-    private function extractString(mixed $data, string $key, string $default): string
-    {
-        if (is_array($data) && isset($data[$key]) && is_string($data[$key])) {
-            return $data[$key];
-        }
-
-        return $default;
     }
 }

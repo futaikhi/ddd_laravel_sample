@@ -18,8 +18,8 @@ info:
     ```
   version: 1.1.0
   contact:
-    name: DDD Team
-    url: https://github.com/pragmatic-ddd
+    name: Futaikhi
+    url: https://futaikhi.vercel.app/
 
 servers:
   - url: http://localhost:8000/api
@@ -297,9 +297,9 @@ paths:
 
   /sales/{id}/cancel:
     post:
-      summary: Cancel sale (PENDING or CONFIRMED → CANCELLED)
+      summary: Cancel sale (PENDING → CANCELLED)
       description: |
-        Allowed from `PENDING` or `CONFIRMED`. `COMPLETED` and `CANCELLED` sales cannot be cancelled again.
+        Allowed only from `PENDING`. `CONFIRMED`, `COMPLETED`, and `CANCELLED` sales cannot be cancelled.
 
         **Command:** `CancelSaleCommand(SaleId, reason)`  
         **Handler:** `CancelSaleHandler`
@@ -490,14 +490,14 @@ components:
 
     PaymentGatewayError:
       description: |
-        `502 Bad Gateway` — The payment gateway is unreachable or returned an unexpected error.
+        `502 Bad Gateway` — The local payment validation adapter raised an unexpected infrastructure error.
         The sale remains in `PENDING`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
           example:
             error: "payment_gateway_error"
-            message: "Payment gateway error: cURL error 28"
+            message: "Payment validation error: unexpected adapter failure"
 
     NotFound:
       description: '`404 Not Found` — Sale does not exist.'

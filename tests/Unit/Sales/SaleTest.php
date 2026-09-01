@@ -198,15 +198,28 @@ final class SaleTest extends TestCase
         $sale = Sale::create(
             SaleId::random(),
             CustomerId::random(),
-            [
-                new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR')),
-            ],
+            [new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR'))],
         );
 
         $sale->cancel('customer changed mind');
 
         $this->assertSame(OrderStatus::CANCELLED, $sale->getStatus());
         $this->assertSame('customer changed mind', $sale->getCancellationReason());
+    }
+
+    public function test_it_cannot_cancel_a_confirmed_sale(): void
+    {
+        $this->expectException(SaleCannotBeCancelledException::class);
+
+        $sale = Sale::create(
+            SaleId::random(),
+            CustomerId::random(),
+            [new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR'))],
+        );
+
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
+
+        $sale->cancel('customer changed mind');
     }
 
     public function test_it_cannot_cancel_an_already_cancelled_sale(): void

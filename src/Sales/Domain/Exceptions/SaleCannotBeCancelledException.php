@@ -11,7 +11,7 @@ final class SaleCannotBeCancelledException extends RuntimeException implements V
 {
     public static function invalidStatus(string $currentStatus): self
     {
-        return new self("Sale cannot be cancelled. Current status is '{$currentStatus}'. Only pending or confirmed sales can be cancelled.");
+        return new self("Sale cannot be cancelled. Current status is '{$currentStatus}'. Only pending sales can be cancelled.");
     }
 
     public static function alreadyCancelled(): self

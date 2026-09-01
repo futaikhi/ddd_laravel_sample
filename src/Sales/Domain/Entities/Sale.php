@@ -168,7 +168,7 @@ final class Sale extends BaseEntity
             throw SaleCannotBeCancelledException::alreadyCancelled();
         }
 
-        if (! in_array($this->status, [OrderStatus::PENDING, OrderStatus::CONFIRMED], true)) {
+        if ($this->status !== OrderStatus::PENDING) {
             throw SaleCannotBeCancelledException::invalidStatus($this->status->value);
         }
 
@@ -239,7 +239,7 @@ final class Sale extends BaseEntity
 
     public function isCancellable(): bool
     {
-        return in_array($this->status, [OrderStatus::PENDING, OrderStatus::CONFIRMED], true);
+        return $this->status === OrderStatus::PENDING;
     }
 
     public function getPaymentMethod(): ?PaymentMethod

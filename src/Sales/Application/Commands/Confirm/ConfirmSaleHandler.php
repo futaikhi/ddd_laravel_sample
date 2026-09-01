@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Src\Sales\Application\Commands\Confirm;
 
+use Src\Sales\Domain\Enums\OrderStatus;
+use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
 use Src\Sales\Domain\Ports\PaymentFailedException;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
@@ -34,9 +36,18 @@ final readonly class ConfirmSaleHandler implements CommandHandlerInterface
     {
         $sale = $this->repository->getById($command->id);
 
+        // Guard before payment processing: never validate/process payment
+        // if the sale is already confirmed/completed/cancelled. The aggregate
+        // still owns the invariant in confirm(); this is a safety check to
+        // avoid duplicate payment records on retries.
+        if ($sale->getStatus() !== OrderStatus::PENDING) {
+            throw SaleCannotBeConfirmedException::notPending($sale->getStatus()->value);
+        }
+
         $paymentResult = $this->paymentGateway->process(new PaymentRequest(
             saleId: $sale->getId()->getValue(),
             amount: $sale->getTotalAmount(),
+            currency: $sale->getTotalAmount()->currency,
             description: "Payment for sale {$sale->getId()->getValue()}",
         ));
 

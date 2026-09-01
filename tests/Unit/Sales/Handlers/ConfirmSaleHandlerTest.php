@@ -10,6 +10,7 @@ use Src\Sales\Application\Commands\Confirm\ConfirmSaleHandler;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Enums\OrderStatus;
 use Src\Sales\Domain\Enums\PaymentMethod;
+use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
 use Src\Sales\Domain\Ports\PaymentFailedException;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
@@ -96,6 +97,29 @@ final class ConfirmSaleHandlerTest extends TestCase
 
         $this->assertSame('TXN-FIXED-999', $sale->getTransactionId());
         $this->assertSame(PaymentMethod::BANK_TRANSFER, $sale->getPaymentMethod());
+    }
+
+    public function test_it_does_not_call_payment_gateway_when_sale_is_not_pending(): void
+    {
+        $sale = $this->makeSale();
+        $sale->confirm(PaymentMethod::CASH, 'TXN-ALREADY-CONFIRMED');
+
+        $repo = $this->makeRepo($sale, expectStore: false);
+
+        $paymentGateway = $this->createMock(PaymentGatewayInterface::class);
+        $paymentGateway->expects($this->never())->method('process');
+
+        $eventBus = $this->createMock(EventBusInterface::class);
+        $eventBus->expects($this->never())->method('publishEvents');
+
+        $handler = new ConfirmSaleHandler($repo, $paymentGateway, $eventBus);
+
+        $this->expectException(SaleCannotBeConfirmedException::class);
+
+        $handler(new ConfirmSaleCommand(
+            id: $sale->getId(),
+            paymentMethod: PaymentMethod::CREDIT_CARD,
+        ));
     }
 
     private function makeSale(): Sale
