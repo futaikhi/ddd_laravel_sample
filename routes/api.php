@@ -48,3 +48,6 @@ Route::prefix('sales')->group(function () {
     Route::post('/{id}/cancel', [SalesController::class, 'cancel']);
     Route::post('/{id}/complete', [SalesController::class, 'complete']);
 });
+
+// Include Swagger/API Documentation routes
+require __DIR__.'/swagger.php';

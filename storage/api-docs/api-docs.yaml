@@ -1,0 +1,411 @@
+openapi: 3.0.0
+info:
+  title: Sales Order DDD API
+  description: |
+    Sales Order Processing API menggunakan Domain-Driven Design dengan Laravel.
+    
+    API ini mendemonstrasikan:
+    - **DDD Domain Model**: Aggregate Root (Sale), Value Objects, Ubiquitous Language
+    - **Hexagonal Architecture**: Ports & Adapters, Repository Pattern
+    - **CQRS**: Command (state changes) vs Query (read operations)
+    - **Domain Events**: Event sourcing untuk audit trail
+  version: 1.0.0
+  contact:
+    name: DDD Team
+    url: https://github.com/pragmatic-ddd
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local Development
+
+paths:
+  /customers:
+    post:
+      summary: Create a new customer
+      description: |
+        Membuat customer baru. Customer ID digunakan dalam pembuatan sales order.
+      tags:
+        - Customers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - phone
+              properties:
+                name:
+                  type: string
+                  example: "PT Maju Jaya"
+                  description: Nama customer
+                email:
+                  type: string
+                  format: email
+                  example: "contact@majujaya.com"
+                phone:
+                  type: string
+                  example: "021-555-1234"
+      responses:
+        '201':
+          description: Customer berhasil dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+                    description: ULID customer ID
+                  message:
+                    type: string
+                    example: "Customer created successfully"
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /products:
+    post:
+      summary: Create a new product
+      description: |
+        Membuat produk baru dengan harga. Harga produk adalah sumber kebenaran (source of truth)
+        untuk line item dalam sales order.
+      tags:
+        - Products
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - sku
+                - price
+                - currency
+              properties:
+                name:
+                  type: string
+                  example: "Laptop Dell XPS 15"
+                sku:
+                  type: string
+                  example: "DEL-XPS15-2024"
+                price:
+                  type: integer
+                  example: 15000000
+                  description: Harga dalam rupiah (cents)
+                currency:
+                  type: string
+                  example: "IDR"
+      responses:
+        '201':
+          description: Produk berhasil dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+                  message:
+                    type: string
+                    example: "Product created successfully"
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /sales:
+    post:
+      summary: Create a new sales order
+      description: |
+        Membuat sales order baru dalam status PENDING.
+        
+        **Business Rules yang divalidasi:**
+        - Minimum order amount: Rp 50,000
+        - Maximum line items: 20
+        - Semua products harus ada di database
+        - Customer harus ada di database
+        - Product prices diambil dari database (source of truth)
+        
+        **Status awal:** PENDING
+        
+        **DDD Concepts:**
+        - Sale adalah Aggregate Root
+        - LineItem adalah Value Object
+        - Validasi bisnis terjadi di Domain Layer (Sale entity)
+      tags:
+        - Sales
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - customer_id
+                - line_items
+              properties:
+                customer_id:
+                  type: string
+                  example: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+                  description: ULID dari customer
+                line_items:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items:
+                    type: object
+                    required:
+                      - product_id
+                      - quantity
+                    properties:
+                      product_id:
+                        type: string
+                        example: "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+                      quantity:
+                        type: integer
+                        minimum: 1
+                        example: 2
+      responses:
+        '201':
+          description: Sales order berhasil dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+                  message:
+                    type: string
+                    example: "Sale created successfully"
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: Customer atau Product tidak ditemukan
+
+  /sales/{saleId}/confirm:
+    post:
+      summary: Confirm a sales order
+      description: |
+        Mengkonfirmasi sales order (transisi status PENDING → CONFIRMED).
+        
+        **Valid Status Transitions:**
+        - PENDING → CONFIRMED (diperbolehkan)
+        - State lain → CONFIRMED (error)
+        
+        **Business Logic:**
+        - Payment gateway memproses pembayaran (PaymentGatewayInterface)
+        - Sale status dikunci ke CONFIRMED
+        - Event: SaleConfirmedEvent dipublikasikan
+        
+        **DDD & Hexagonal Architecture:**
+        - Domain entity melakukan validasi state machine
+        - PaymentGatewayInterface adalah port (abstraksi)
+        - LaravelPaymentGatewayAdapter adalah adapter (implementasi framework-specific)
+      tags:
+        - Sales
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Sales order berhasil dikonfirmasi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+                  message:
+                    type: string
+                    example: "Sale confirmed successfully"
+        '400':
+          $ref: '#/components/responses/InvalidStateTransition'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Payment gateway error
+
+  /sales/{saleId}/complete:
+    post:
+      summary: Complete a sales order
+      description: |
+        Menyelesaikan sales order (transisi status CONFIRMED → COMPLETED).
+        
+        **Valid Status Transitions:**
+        - CONFIRMED → COMPLETED (diperbolehkan)
+        - State lain → COMPLETED (error)
+        
+        **Business Logic:**
+        - Commission dihitung berdasarkan total amount:
+          - Amount > Rp 1,000,000: 5% commission
+          - Amount ≤ Rp 1,000,000: 3% commission
+        - Event: SaleCompletedEvent dipublikasikan
+        
+        **DDD Business Rules:**
+        - Commission calculation adalah domain logic
+        - CommissionCalculatorInterface adalah port (extensible)
+        - DatabaseCommissionService adalah adapter (production)
+        - MockCommissionService adalah test double
+      tags:
+        - Sales
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Sales order berhasil diselesaikan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+                  message:
+                    type: string
+                    example: "Sale completed successfully"
+        '400':
+          $ref: '#/components/responses/InvalidStateTransition'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sales/{saleId}/cancel:
+    post:
+      summary: Cancel a sales order
+      description: |
+        Membatalkan sales order (transisi status PENDING → CANCELLED).
+        
+        **Valid Status Transitions:**
+        - PENDING → CANCELLED (diperbolehkan)
+        - State lain → CANCELLED (error: tidak bisa batalkan non-pending)
+        
+        **Business Logic:**
+        - Sale ditandai sebagai CANCELLED
+        - Tidak ada pembayaran yang diproses
+        - Event: SaleCancelledEvent dipublikasikan
+      tags:
+        - Sales
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: "Customer requested cancellation"
+      responses:
+        '200':
+          description: Sales order berhasil dibatalkan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+                  message:
+                    type: string
+                    example: "Sale cancelled successfully"
+        '400':
+          $ref: '#/components/responses/InvalidStateTransition'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  responses:
+    ValidationError:
+      description: Input validation error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "The given data was invalid."
+              errors:
+                type: object
+                example:
+                  customer_id: ["The customer_id field is required."]
+
+    InvalidStateTransition:
+      description: Invalid state transition for sale
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "Cannot confirm a completed sale"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: "Sale not found"
+
+tags:
+  - name: Customers
+    description: Customer management endpoints
+  - name: Products
+    description: Product management endpoints
+  - name: Sales
+    description: |
+      Sales Order lifecycle operations.
+      
+      **Status Flow:**
+      ```
+      PENDING → CONFIRMED → COMPLETED
+            ↘
+             CANCELLED (only from PENDING)
+      ```
+      
+      **DDD Concepts in Sales:**
+      - **Aggregate Root**: Sale
+      - **Value Objects**: SaleId, CustomerId, ProductId, Money, LineItem, OrderStatus
+      - **Business Rules**: Minimum amount, max line items, state transitions
+      - **Ubiquitous Language**: create, confirm, complete, cancel
