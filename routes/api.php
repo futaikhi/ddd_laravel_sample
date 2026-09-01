@@ -43,10 +43,17 @@ Route::prefix('products')->group(function () {
 });
 
 Route::prefix('sales')->group(function () {
+    // Commands (write side)
     Route::post('/', [SalesController::class, 'create']);
     Route::post('/{id}/confirm', [SalesController::class, 'confirm']);
     Route::post('/{id}/cancel', [SalesController::class, 'cancel']);
     Route::post('/{id}/complete', [SalesController::class, 'complete']);
+
+    // Queries (read side) — CQRS
+    Route::get('/', [SalesController::class, 'index']);
+    Route::get('/reports/sales', [SalesController::class, 'salesReport']);
+    Route::get('/reports/commissions', [SalesController::class, 'commissionSummary']);
+    Route::get('/{id}', [SalesController::class, 'show']);
 });
 
 // Include Swagger/API Documentation routes

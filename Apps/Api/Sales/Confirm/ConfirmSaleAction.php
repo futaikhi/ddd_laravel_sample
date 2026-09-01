@@ -19,6 +19,7 @@ final readonly class ConfirmSaleAction
     {
         $this->commandBus->dispatch(new ConfirmSaleCommand(
             id: $dto->saleId,
+            paymentMethod: $dto->paymentMethod,
         ));
 
         return new SaleActionRes(message: 'Sale confirmed successfully');

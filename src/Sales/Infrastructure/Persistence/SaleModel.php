@@ -26,6 +26,12 @@ final class SaleModel extends Model
         'cancelled_at',
         'cancellation_reason',
         'completed_at',
+        'created_at',
+        'payment_method',
+        'transaction_id',
+        'commission_amount',
+        'commission_rate',
+        'commission_currency',
     ];
 
     public function lineItems(): HasMany

@@ -6,6 +6,7 @@ namespace Src\Sales\Domain\Entities;
 
 use DateTimeImmutable;
 use Src\Sales\Domain\Enums\OrderStatus;
+use Src\Sales\Domain\Enums\PaymentMethod;
 use Src\Sales\Domain\Events\SaleCancelledEvent;
 use Src\Sales\Domain\Events\SaleCompletedEvent;
 use Src\Sales\Domain\Events\SaleConfirmedEvent;
@@ -14,6 +15,7 @@ use Src\Sales\Domain\Exceptions\MinimumOrderAmountException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCancelledException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCompletedException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
+use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
@@ -39,6 +41,9 @@ final class Sale extends BaseEntity
         private ?DateTimeImmutable $cancelledAt = null,
         private ?string $cancellationReason = null,
         private ?DateTimeImmutable $completedAt = null,
+        private ?PaymentMethod $paymentMethod = null,
+        private ?string $transactionId = null,
+        private ?Commission $commission = null,
     ) {
     }
 
@@ -71,6 +76,9 @@ final class Sale extends BaseEntity
             status: OrderStatus::PENDING,
             totalAmount: $total,
             createdAt: new DateTimeImmutable(),
+            paymentMethod: null,
+            transactionId: null,
+            commission: null,
         );
 
         $sale->recordLast(SaleCreatedEvent::fromEntity($sale));
@@ -92,6 +100,9 @@ final class Sale extends BaseEntity
         ?DateTimeImmutable $cancelledAt = null,
         ?string $cancellationReason = null,
         ?DateTimeImmutable $completedAt = null,
+        ?PaymentMethod $paymentMethod = null,
+        ?string $transactionId = null,
+        ?Commission $commission = null,
     ): self {
         $sale = new self(
             id: $id,
@@ -104,12 +115,23 @@ final class Sale extends BaseEntity
             cancelledAt: $cancelledAt,
             cancellationReason: $cancellationReason,
             completedAt: $completedAt,
+            paymentMethod: $paymentMethod,
+            transactionId: $transactionId,
+            commission: $commission,
         );
 
         return $sale;
     }
 
-    public function confirm(): void
+    /**
+     * Confirm the sale after payment has been captured.
+     *
+     * Orchestration of the payment call lives in the Application layer
+     * (see ConfirmSaleHandler + PaymentGatewayInterface). The gateway
+     * result (transactionId + paymentMethod) is handed to this aggregate
+     * so the domain stays the single source of truth for the sale state.
+     */
+    public function confirm(PaymentMethod $paymentMethod, string $transactionId): void
     {
         if ($this->status !== OrderStatus::PENDING) {
             throw SaleCannotBeConfirmedException::notPending($this->status->value);
@@ -117,11 +139,17 @@ final class Sale extends BaseEntity
 
         $this->status = OrderStatus::CONFIRMED;
         $this->confirmedAt = new DateTimeImmutable();
+        $this->paymentMethod = $paymentMethod;
+        $this->transactionId = $transactionId;
 
         $this->recordLast(SaleConfirmedEvent::fromEntity($this));
     }
 
-    public function complete(): void
+    /**
+     * Complete the sale and lock the commission calculated by the
+     * CommissionCalculatorInterface port (called from CompleteSaleHandler).
+     */
+    public function complete(Commission $commission): void
     {
         if ($this->status !== OrderStatus::CONFIRMED) {
             throw SaleCannotBeCompletedException::notConfirmed($this->status->value);
@@ -129,6 +157,7 @@ final class Sale extends BaseEntity
 
         $this->status = OrderStatus::COMPLETED;
         $this->completedAt = new DateTimeImmutable();
+        $this->commission = $commission;
 
         $this->recordLast(SaleCompletedEvent::fromEntity($this));
     }
@@ -211,5 +240,20 @@ final class Sale extends BaseEntity
     public function isCancellable(): bool
     {
         return in_array($this->status, [OrderStatus::PENDING, OrderStatus::CONFIRMED], true);
+    }
+
+    public function getPaymentMethod(): ?PaymentMethod
+    {
+        return $this->paymentMethod;
+    }
+
+    public function getTransactionId(): ?string
+    {
+        return $this->transactionId;
+    }
+
+    public function getCommission(): ?Commission
+    {
+        return $this->commission;
     }
 }

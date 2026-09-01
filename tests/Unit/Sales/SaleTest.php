@@ -7,10 +7,12 @@ namespace Tests\Unit\Sales;
 use PHPUnit\Framework\TestCase;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Enums\OrderStatus;
+use Src\Sales\Domain\Enums\PaymentMethod;
 use Src\Sales\Domain\Exceptions\MinimumOrderAmountException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCancelledException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCompletedException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
+use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
@@ -89,7 +91,7 @@ final class SaleTest extends TestCase
             ],
         );
 
-        $sale->confirm();
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
 
         $this->assertSame(OrderStatus::CONFIRMED, $sale->getStatus());
         $this->assertCount(2, $sale->releaseEvents());
@@ -107,9 +109,9 @@ final class SaleTest extends TestCase
             ],
         );
 
-        $sale->confirm();
-        $sale->complete();
-        $sale->confirm();
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
+        $sale->complete(Commission::fromRate($sale->getTotalAmount(), 3.0));
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
     }
 
     public function test_it_can_complete_a_confirmed_sale(): void
@@ -122,8 +124,8 @@ final class SaleTest extends TestCase
             ],
         );
 
-        $sale->confirm();
-        $sale->complete();
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
+        $sale->complete(Commission::fromRate($sale->getTotalAmount(), 3.0));
 
         $this->assertSame(OrderStatus::COMPLETED, $sale->getStatus());
     }
@@ -140,7 +142,7 @@ final class SaleTest extends TestCase
             ],
         );
 
-        $sale->complete();
+        $sale->complete(Commission::fromRate($sale->getTotalAmount(), 3.0));
     }
 
     public function test_it_cannot_reopen_a_completed_sale(): void
@@ -155,9 +157,9 @@ final class SaleTest extends TestCase
             ],
         );
 
-        $sale->confirm();
-        $sale->complete();
-        $sale->confirm();
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
+        $sale->complete(Commission::fromRate($sale->getTotalAmount(), 3.0));
+        $sale->confirm(PaymentMethod::CASH, 'TXN-TEST-001');
     }
 
     public function test_it_cannot_reopen_a_cancelled_sale(): void
@@ -188,7 +190,7 @@ final class SaleTest extends TestCase
             ],
         );
 
-        $sale->complete();
+        $sale->complete(Commission::fromRate($sale->getTotalAmount(), 3.0));
     }
 
     public function test_it_can_cancel_a_pending_sale(): void

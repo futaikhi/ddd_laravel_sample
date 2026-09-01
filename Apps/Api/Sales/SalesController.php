@@ -12,6 +12,13 @@ use Apps\Api\Sales\Confirm\ConfirmSaleAction;
 use Apps\Api\Sales\Confirm\ConfirmSaleRequest;
 use Apps\Api\Sales\Create\CreateSaleAction;
 use Apps\Api\Sales\Create\CreateSaleRequest;
+use Apps\Api\Sales\Index\IndexSalesAction;
+use Apps\Api\Sales\Index\IndexSalesRequest;
+use Apps\Api\Sales\Reports\CommissionSummaryAction;
+use Apps\Api\Sales\Reports\ReportDateRangeRequest;
+use Apps\Api\Sales\Reports\SalesReportAction;
+use Apps\Api\Sales\Show\ShowSaleAction;
+use Apps\Api\Sales\Show\ShowSaleRequest;
 use Illuminate\Http\JsonResponse;
 
 final class SalesController
@@ -46,6 +53,42 @@ final class SalesController
     public function complete(
         CompleteSaleRequest $request,
         CompleteSaleAction $action,
+    ): JsonResponse {
+        $resource = $action($request->getDto());
+
+        return response()->json($resource);
+    }
+
+    public function show(
+        ShowSaleRequest $request,
+        ShowSaleAction $action,
+    ): JsonResponse {
+        $resource = $action($request->getDto());
+
+        return response()->json($resource);
+    }
+
+    public function index(
+        IndexSalesRequest $request,
+        IndexSalesAction $action,
+    ): JsonResponse {
+        $resource = $action($request->getDto());
+
+        return response()->json($resource);
+    }
+
+    public function salesReport(
+        ReportDateRangeRequest $request,
+        SalesReportAction $action,
+    ): JsonResponse {
+        $resource = $action($request->getDto());
+
+        return response()->json($resource);
+    }
+
+    public function commissionSummary(
+        ReportDateRangeRequest $request,
+        CommissionSummaryAction $action,
     ): JsonResponse {
         $resource = $action($request->getDto());
 

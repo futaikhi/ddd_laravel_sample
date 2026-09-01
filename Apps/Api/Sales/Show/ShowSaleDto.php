@@ -2,16 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Apps\Api\Sales\Confirm;
+namespace Apps\Api\Sales\Show;
 
-use Src\Sales\Domain\Enums\PaymentMethod;
 use Src\Sales\Domain\ValueObjects\SaleId;
 
-final readonly class ConfirmSaleDto
+final readonly class ShowSaleDto
 {
     public function __construct(
         public SaleId $saleId,
-        public PaymentMethod $paymentMethod,
     ) {
     }
 }

@@ -11,6 +11,13 @@ use Bugsnag\BugsnagLaravel\Facades\Bugsnag;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Src\Sales\Domain\Exceptions\SaleCannotBeCancelledException;
+use Src\Sales\Domain\Exceptions\SaleCannotBeCompletedException;
+use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
+use Src\Sales\Domain\Exceptions\SaleNotFoundException;
+use Src\Sales\Domain\Ports\PaymentFailedException;
+use Src\Sales\Domain\Ports\PaymentGatewayException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -40,5 +47,60 @@ return Application::configure(basePath: dirname(__DIR__))
             if (app()->bound('bugsnag')) {
                 Bugsnag::notifyException($e);
             }
+        });
+        // Map Sales domain / port exceptions to proper HTTP status codes so
+        // the HTTP adapter layer stays thin (Hexagonal Architecture).
+        $exceptions->render(function (PaymentFailedException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'payment_failed',
+                    'message' => $e->getMessage(),
+                ], 402); // 402 Payment Required
+            }
+            return null;
+        });
+
+        $exceptions->render(function (PaymentGatewayException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'payment_gateway_error',
+                    'message' => $e->getMessage(),
+                ], 502); // 502 Bad Gateway
+            }
+            return null;
+        });
+
+        $exceptions->render(function (SaleNotFoundException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'sale_not_found',
+                    'message' => $e->getMessage(),
+                ], 404);
+            }
+            return null;
+        });
+
+        $exceptions->render(function (SaleCannotBeConfirmedException|SaleCannotBeCompletedException|SaleCannotBeCancelledException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'invalid_sale_state',
+                    'message' => $e->getMessage(),
+                ], 409); // 409 Conflict
+            }
+            return null;
+        });
+
+        // Value-object / DTO validation failures thrown from Request::getDto()
+        // (missing/invalid fields, bad enums, malformed UUIDs, etc.) become
+        // 422 Unprocessable Entity — the standard for well-formed but
+        // semantically invalid input.
+        $exceptions->render(function (\InvalidArgumentException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'validation_failed',
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
+            return null;
         });
     })->create();
