@@ -6,6 +6,8 @@ namespace Apps\Api\Sales\Create;
 
 use Apps\Api\Sales\Shared\SaleCreatedRes;
 use Src\Sales\Application\Commands\Create\CreateSaleCommand;
+use Src\Sales\Domain\Exceptions\CustomerNotFoundException;
+use Src\Sales\Domain\Exceptions\ProductNotFoundException;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\ProductId;
@@ -21,18 +23,16 @@ final readonly class CreateSaleAction
     public function __invoke(CreateSaleDto $dto): SaleCreatedRes
     {
         $customer = \App\Models\Customer::query()->find($dto->customerId->getValue());
-
         if ($customer === null) {
-            throw new \RuntimeException('Customer does not exist.');
+            throw CustomerNotFoundException::withId($dto->customerId);
         }
 
         /** @var list<LineItem> $lineItems */
         $lineItems = [];
         foreach ($dto->lineItems as $item) {
             $product = \App\Models\Product::query()->find($item->productId);
-
             if ($product === null) {
-                throw new \RuntimeException('Product does not exist: '.$item->productId);
+                throw ProductNotFoundException::withId($item->productId);
             }
 
             $lineItems[] = new LineItem(

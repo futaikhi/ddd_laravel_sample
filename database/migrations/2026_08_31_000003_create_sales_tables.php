@@ -16,6 +16,7 @@ return new class extends Migration
             $table->timestamp('confirmed_at')->nullable();
             $table->timestamp('cancelled_at')->nullable();
             $table->string('cancellation_reason')->nullable();
+            $table->timestamp('created_at')->nullable();
             $table->timestamp('completed_at')->nullable();
         });
 

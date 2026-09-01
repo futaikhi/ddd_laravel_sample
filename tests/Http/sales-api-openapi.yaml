@@ -2,14 +2,21 @@ openapi: 3.0.0
 info:
   title: Sales Order DDD API
   description: |
-    Sales Order Processing API menggunakan Domain-Driven Design dengan Laravel.
-    
-    API ini mendemonstrasikan:
-    - **DDD Domain Model**: Aggregate Root (Sale), Value Objects, Ubiquitous Language
-    - **Hexagonal Architecture**: Ports & Adapters, Repository Pattern
-    - **CQRS**: Command (state changes) vs Query (read operations)
-    - **Domain Events**: Event sourcing untuk audit trail
-  version: 1.0.0
+    Sales Order Processing API — Domain-Driven Design, Hexagonal Architecture, and CQRS on Laravel.
+
+    ## Architectural Concepts Demonstrated
+    - **DDD Domain Model**: `Sale` aggregate root + value objects (`SaleId`, `Money`, `LineItem`, `PaymentMethod`, `Commission`)
+    - **Hexagonal Architecture**: Ports (`PaymentGatewayInterface`, `CommissionCalculatorInterface`, `SaleRepositoryInterface`, `SaleReadModelRepositoryInterface`) + framework adapters (Eloquent, HTTP, mock)
+    - **CQRS**: Commands (write side, return `void`) vs Queries (read side, return flat DTOs / read models)
+    - **Domain Events**: `SaleCreatedEvent`, `SaleConfirmedEvent`, `SaleCompletedEvent`, `SaleCancelledEvent`
+
+    ## Sale Status Machine
+    ```
+    PENDING ──confirm──▶ CONFIRMED ──complete──▶ COMPLETED
+       │                     │
+       └──cancel──▶ CANCELLED ◀──cancel──┘
+    ```
+  version: 1.1.0
   contact:
     name: DDD Team
     url: https://github.com/pragmatic-ddd
@@ -18,394 +25,497 @@ servers:
   - url: http://localhost:8000/api
     description: Local Development
 
+tags:
+  - name: Customers
+    description: Customer management endpoints (referenced by Sales)
+  - name: Products
+    description: Product management endpoints (referenced by Sales line items)
+  - name: Sales - Commands
+    description: |
+      Write-side (CQRS Commands). Return `void` — only a status message.
+      To see the resulting state, call the corresponding Query endpoint.
+  - name: Sales - Queries
+    description: |
+      Read-side (CQRS Queries). Return flat read models (`SaleDetailRM`, `SaleListItemRM`, ...),
+      never write-side aggregates. Optimized for display; may safely join data across contexts.
+  - name: Sales - Reports
+    description: Aggregated read models (revenue per day, commission per day).
+
 paths:
+
+  # ─────────────────────────────────────────────────────────────
+  # Customers
+  # ─────────────────────────────────────────────────────────────
   /customers:
     post:
       summary: Create a new customer
-      description: |
-        Membuat customer baru. Customer ID digunakan dalam pembuatan sales order.
-      tags:
-        - Customers
+      tags: [Customers]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - name
-                - email
-                - phone
+              required: [name, email, phone]
               properties:
-                name:
-                  type: string
-                  example: "PT Maju Jaya"
-                  description: Nama customer
-                email:
-                  type: string
-                  format: email
-                  example: "contact@majujaya.com"
-                phone:
-                  type: string
-                  example: "021-555-1234"
+                name:  { type: string, example: "PT Maju Jaya" }
+                email: { type: string, format: email, example: "contact@majujaya.com" }
+                phone: { type: string, example: "021-555-1234" }
       responses:
         '201':
-          description: Customer berhasil dibuat
+          description: Customer created
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: string
-                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-                    description: ULID customer ID
-                  message:
-                    type: string
-                    example: "Customer created successfully"
-        '400':
-          $ref: '#/components/responses/ValidationError'
+                  id:      { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAV", description: "ULID" }
+                  message: { type: string, example: "Customer created successfully" }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
+  # ─────────────────────────────────────────────────────────────
+  # Products
+  # ─────────────────────────────────────────────────────────────
   /products:
     post:
       summary: Create a new product
       description: |
-        Membuat produk baru dengan harga. Harga produk adalah sumber kebenaran (source of truth)
-        untuk line item dalam sales order.
-      tags:
-        - Products
+        Price stored in minor units (e.g. rupiah cents). Product price is the source of truth
+        for `LineItem.unitPrice` inside a Sale.
+      tags: [Products]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - name
-                - sku
-                - price
-                - currency
+              required: [name, sku, price, currency]
               properties:
-                name:
-                  type: string
-                  example: "Laptop Dell XPS 15"
-                sku:
-                  type: string
-                  example: "DEL-XPS15-2024"
-                price:
-                  type: integer
-                  example: 15000000
-                  description: Harga dalam rupiah (cents)
-                currency:
-                  type: string
-                  example: "IDR"
+                name:     { type: string,  example: "Laptop Dell XPS 15" }
+                sku:      { type: string,  example: "DEL-XPS15-2024" }
+                price:    { type: integer, example: 15000000, description: "Price in minor units (rupiah cents)" }
+                currency: { type: string,  example: "IDR" }
       responses:
         '201':
-          description: Produk berhasil dibuat
+          description: Product created
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: string
-                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAW"
-                  message:
-                    type: string
-                    example: "Product created successfully"
-        '400':
-          $ref: '#/components/responses/ValidationError'
+                  id:      { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAW" }
+                  message: { type: string, example: "Product created successfully" }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
+  # ─────────────────────────────────────────────────────────────
+  # Sales - Commands (write side)
+  # ─────────────────────────────────────────────────────────────
   /sales:
     post:
-      summary: Create a new sales order
+      summary: Create sales order (PENDING)
       description: |
-        Membuat sales order baru dalam status PENDING.
-        
-        **Business Rules yang divalidasi:**
-        - Minimum order amount: Rp 50,000
-        - Maximum line items: 20
-        - Semua products harus ada di database
-        - Customer harus ada di database
-        - Product prices diambil dari database (source of truth)
-        
-        **Status awal:** PENDING
-        
-        **DDD Concepts:**
-        - Sale adalah Aggregate Root
-        - LineItem adalah Value Object
-        - Validasi bisnis terjadi di Domain Layer (Sale entity)
-      tags:
-        - Sales
+        Creates a Sale aggregate in status `PENDING`. Enforced business rules (domain layer):
+        - Minimum order amount: **50,000**
+        - Maximum line items: **20**
+        - Every line item must have quantity ≥ 1 and unit price ≥ 1
+        - Customer & Product must exist
+
+        **Aggregate:** `Sale`  
+        **Command:** `CreateSaleCommand`  
+        **Handler:** `CreateSaleHandler`
+      tags: [Sales - Commands]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - customer_id
-                - line_items
+              required: [customer_id, line_items]
               properties:
                 customer_id:
                   type: string
                   example: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-                  description: ULID dari customer
                 line_items:
                   type: array
                   minItems: 1
                   maxItems: 20
                   items:
                     type: object
-                    required:
-                      - product_id
-                      - quantity
+                    required: [product_id, quantity]
                     properties:
-                      product_id:
-                        type: string
-                        example: "01ARZ3NDEKTSV4RRFFQ69G5FAW"
-                      quantity:
-                        type: integer
-                        minimum: 1
-                        example: 2
+                      product_id: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAW" }
+                      quantity:   { type: integer, minimum: 1, example: 2 }
       responses:
         '201':
-          description: Sales order berhasil dibuat
+          description: Sale created (status PENDING)
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: string
-                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-                  message:
-                    type: string
-                    example: "Sale created successfully"
-        '400':
-          $ref: '#/components/responses/ValidationError'
+                  id:      { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
+                  message: { type: string, example: "Sale created successfully" }
         '404':
-          description: Customer atau Product tidak ditemukan
+          description: |
+            `404 Not Found` — Referenced `customer_id` or one of the `product_id`s
+            does not exist. Handled by `CustomerNotFoundException` /
+            `ProductNotFoundException`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                customer:
+                  value: { error: "customer_not_found", message: "Customer 01ARZ3NDEKTSV4RRFFQ69G5FAV was not found." }
+                product:
+                  value: { error: "product_not_found",  message: "Product 01ARZ3NDEKTSV4RRFFQ69G5FAW was not found." }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  /sales/{saleId}/confirm:
-    post:
-      summary: Confirm a sales order
+    get:
+      summary: List sales (paginated, filterable)
       description: |
-        Mengkonfirmasi sales order (transisi status PENDING → CONFIRMED).
-        
-        **Valid Status Transitions:**
-        - PENDING → CONFIRMED (diperbolehkan)
-        - State lain → CONFIRMED (error)
-        
-        **Business Logic:**
-        - Payment gateway memproses pembayaran (PaymentGatewayInterface)
-        - Sale status dikunci ke CONFIRMED
-        - Event: SaleConfirmedEvent dipublikasikan
-        
-        **DDD & Hexagonal Architecture:**
-        - Domain entity melakukan validasi state machine
-        - PaymentGatewayInterface adalah port (abstraksi)
-        - LaravelPaymentGatewayAdapter adalah adapter (implementasi framework-specific)
-      tags:
-        - Sales
+        **CQRS Query** — returns a `PaginatedCollection<SaleListItemRM>` (flat read model, not aggregates).
+
+        **Query:** `ListSalesQuery`  
+        **Handler:** `ListSalesHandler`  
+        **Read port:** `SaleReadModelRepositoryInterface::paginate()`
+      tags: [Sales - Queries]
       parameters:
-        - name: saleId
-          in: path
-          required: true
-          schema:
-            type: string
-            example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
+        - { name: customer_id, in: query, schema: { type: string }, description: "Filter by customer ULID" }
+        - { name: status,      in: query, schema: { $ref: '#/components/schemas/OrderStatus' }, description: "Filter by sale status" }
+        - { name: date_from,   in: query, schema: { type: string, example: "2026-08-01 00:00:00" } }
+        - { name: date_to,     in: query, schema: { type: string, example: "2026-08-31 23:59:59" } }
+        - { name: limit,       in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 20 } }
+        - { name: offset,      in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
         '200':
-          description: Sales order berhasil dikonfirmasi
+          description: Paginated list of sales
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: string
-                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-                  message:
-                    type: string
-                    example: "Sale confirmed successfully"
-        '400':
-          $ref: '#/components/responses/InvalidStateTransition'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '503':
-          description: Payment gateway error
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SaleListItemRM' }
+                  pageSize:   { type: integer, example: 20 }
+                  page:       { type: integer, example: 1 }
+                  totalCount: { type: integer, example: 87 }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  /sales/{saleId}/complete:
-    post:
-      summary: Complete a sales order
+  /sales/{id}:
+    get:
+      summary: Get sale detail
       description: |
-        Menyelesaikan sales order (transisi status CONFIRMED → COMPLETED).
-        
-        **Valid Status Transitions:**
-        - CONFIRMED → COMPLETED (diperbolehkan)
-        - State lain → COMPLETED (error)
-        
-        **Business Logic:**
-        - Commission dihitung berdasarkan total amount:
-          - Amount > Rp 1,000,000: 5% commission
-          - Amount ≤ Rp 1,000,000: 3% commission
-        - Event: SaleCompletedEvent dipublikasikan
-        
-        **DDD Business Rules:**
-        - Commission calculation adalah domain logic
-        - CommissionCalculatorInterface adalah port (extensible)
-        - DatabaseCommissionService adalah adapter (production)
-        - MockCommissionService adalah test double
-      tags:
-        - Sales
+        **CQRS Query** — returns a flat `SaleDetailRM` (never a write-side aggregate).
+
+        **Query:** `GetSaleByIdQuery`  
+        **Handler:** `GetSaleByIdHandler`  
+        **Read port:** `SaleReadModelRepositoryInterface::findDetail()`
+      tags: [Sales - Queries]
       parameters:
-        - name: saleId
-          in: path
-          required: true
-          schema:
-            type: string
-            example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
+        - { name: id, in: path, required: true, schema: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" } }
       responses:
         '200':
-          description: Sales order berhasil diselesaikan
+          description: Sale detail
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-                  message:
-                    type: string
-                    example: "Sale completed successfully"
-        '400':
-          $ref: '#/components/responses/InvalidStateTransition'
-        '404':
-          $ref: '#/components/responses/NotFound'
+              schema: { $ref: '#/components/schemas/SaleDetailRM' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
-  /sales/{saleId}/cancel:
+  /sales/{id}/confirm:
     post:
-      summary: Cancel a sales order
+      summary: Confirm sale (PENDING → CONFIRMED)
       description: |
-        Membatalkan sales order (transisi status PENDING → CANCELLED).
-        
-        **Valid Status Transitions:**
-        - PENDING → CANCELLED (diperbolehkan)
-        - State lain → CANCELLED (error: tidak bisa batalkan non-pending)
-        
-        **Business Logic:**
-        - Sale ditandai sebagai CANCELLED
-        - Tidak ada pembayaran yang diproses
-        - Event: SaleCancelledEvent dipublikasikan
-      tags:
-        - Sales
+        Orchestrates the confirmation:
+        1. Load the aggregate
+        2. Call `PaymentGatewayInterface::process()` (hexagonal port)
+        3. On success, transition aggregate to `CONFIRMED` and lock the payment info
+        4. Persist and publish `SaleConfirmedEvent`
+
+        **Command:** `ConfirmSaleCommand(SaleId, PaymentMethod)`  
+        **Handler:** `ConfirmSaleHandler` (injects `SaleRepositoryInterface`, `PaymentGatewayInterface`)
+
+        On payment failure the aggregate **stays PENDING** and the API returns **402 Payment Required**.
+      tags: [Sales - Commands]
       parameters:
-        - name: saleId
-          in: path
-          required: true
-          schema:
-            type: string
-            example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+        - { name: id, in: path, required: true, schema: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" } }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [payment_method]
               properties:
-                reason:
-                  type: string
-                  example: "Customer requested cancellation"
+                payment_method:
+                  $ref: '#/components/schemas/PaymentMethod'
       responses:
         '200':
-          description: Sales order berhasil dibatalkan
+          description: Sale confirmed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleActionResponse' }
+        '402': { $ref: '#/components/responses/PaymentFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidSaleState' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '502': { $ref: '#/components/responses/PaymentGatewayError' }
+
+  /sales/{id}/complete:
+    post:
+      summary: Complete sale (CONFIRMED → COMPLETED)
+      description: |
+        Orchestrates completion + commission calculation:
+        1. Load the aggregate
+        2. Call `CommissionCalculatorInterface::calculate($sale)` (hexagonal port)
+        3. Transition to `COMPLETED` and lock the returned `Commission` value object
+        4. Persist and publish `SaleCompletedEvent`
+
+        **Commission rules** (see `DatabaseCommissionService`):
+        - `total_amount > 1,000,000` → **5%**
+        - otherwise → **3%**
+
+        **Command:** `CompleteSaleCommand`  
+        **Handler:** `CompleteSaleHandler` (injects `SaleRepositoryInterface`, `CommissionCalculatorInterface`)
+      tags: [Sales - Commands]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Sale completed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleActionResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidSaleState' }
+
+  /sales/{id}/cancel:
+    post:
+      summary: Cancel sale (PENDING or CONFIRMED → CANCELLED)
+      description: |
+        Allowed from `PENDING` or `CONFIRMED`. `COMPLETED` and `CANCELLED` sales cannot be cancelled again.
+
+        **Command:** `CancelSaleCommand(SaleId, reason)`  
+        **Handler:** `CancelSaleHandler`
+      tags: [Sales - Commands]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, example: "Customer requested cancellation" }
+      responses:
+        '200':
+          description: Sale cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleActionResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidSaleState' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ─────────────────────────────────────────────────────────────
+  # Sales - Reports (aggregated queries)
+  # ─────────────────────────────────────────────────────────────
+  /sales/reports/sales:
+    get:
+      summary: Daily sales report
+      description: |
+        Returns per-day revenue for `COMPLETED` sales in the given range.
+
+        **Query:** `GetSalesReportQuery(from, to)`  
+        **Handler:** `GetSalesReportHandler`  
+        **Read port:** `SaleReadModelRepositoryInterface::salesReport()`
+      tags: [Sales - Reports]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, example: "2026-08-01 00:00:00" } }
+        - { name: to,   in: query, required: true, schema: { type: string, example: "2026-08-31 23:59:59" } }
+      responses:
+        '200':
+          description: Aggregated per-day sales report
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                    example: "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-                  message:
-                    type: string
-                    example: "Sale cancelled successfully"
-        '400':
-          $ref: '#/components/responses/InvalidStateTransition'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                type: array
+                items: { $ref: '#/components/schemas/SalesReportRM' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /sales/reports/commissions:
+    get:
+      summary: Daily commission summary
+      description: |
+        Returns per-day commission totals for `COMPLETED` sales.
+
+        **Query:** `GetCommissionSummaryQuery(from, to)`  
+        **Handler:** `GetCommissionSummaryHandler`  
+        **Read port:** `SaleReadModelRepositoryInterface::commissionSummary()`
+      tags: [Sales - Reports]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, example: "2026-08-01 00:00:00" } }
+        - { name: to,   in: query, required: true, schema: { type: string, example: "2026-08-31 23:59:59" } }
+      responses:
+        '200':
+          description: Aggregated per-day commission summary
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CommissionSummaryRM' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
 components:
-  responses:
-    ValidationError:
-      description: Input validation error
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              message:
-                type: string
-                example: "The given data was invalid."
-              errors:
-                type: object
-                example:
-                  customer_id: ["The customer_id field is required."]
 
-    InvalidStateTransition:
-      description: Invalid state transition for sale
+  schemas:
+
+    # ── Enums / small value objects
+    OrderStatus:
+      type: string
+      enum: [pending, confirmed, completed, cancelled]
+
+    PaymentMethod:
+      type: string
+      description: |
+        Whitelisted payment methods. Backed by `Src\Sales\Domain\Enums\PaymentMethod`.
+        Case-insensitive on input; always lowercase on output.
+      enum: [credit_card, bank_transfer, e_wallet, cash]
+      example: credit_card
+
+    # ── Common success payload for command endpoints
+    SaleActionResponse:
+      type: object
+      properties:
+        message: { type: string, example: "Sale confirmed successfully" }
+
+    # ── Read models (CQRS - Query side)
+    SaleLineItemRM:
+      type: object
+      properties:
+        productId: { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAW" }
+        quantity:  { type: integer, example: 2 }
+        unitPrice: { type: integer, example: 15000000, description: "Minor units" }
+        currency:  { type: string,  example: "IDR" }
+        lineTotal: { type: integer, example: 30000000 }
+
+    SaleListItemRM:
+      type: object
+      properties:
+        id:          { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
+        customerId:  { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }
+        status:      { $ref: '#/components/schemas/OrderStatus' }
+        totalAmount: { type: integer, example: 30500000 }
+        currency:    { type: string,  example: "IDR" }
+        createdAt:   { type: string,  example: "2026-08-15 10:12:00" }
+
+    SaleDetailRM:
+      type: object
+      properties:
+        id:                 { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
+        customerId:         { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }
+        status:             { $ref: '#/components/schemas/OrderStatus' }
+        totalAmount:        { type: integer, example: 30500000 }
+        currency:           { type: string,  example: "IDR" }
+        lineItems:
+          type: array
+          items: { $ref: '#/components/schemas/SaleLineItemRM' }
+        paymentMethod:      { type: string,  nullable: true, example: "credit_card" }
+        transactionId:      { type: string,  nullable: true, example: "MOCK-1a2b3c4d5e6f7080" }
+        commissionAmount:   { type: integer, nullable: true, example: 915000, description: "Minor units" }
+        commissionRate:     { type: number,  nullable: true, example: 3.0 }
+        commissionCurrency: { type: string,  nullable: true, example: "IDR" }
+        createdAt:          { type: string,  example: "2026-08-15 10:12:00" }
+        confirmedAt:        { type: string,  nullable: true, example: "2026-08-15 10:15:22" }
+        completedAt:        { type: string,  nullable: true, example: "2026-08-15 11:30:00" }
+        cancelledAt:        { type: string,  nullable: true, example: null }
+        cancellationReason: { type: string,  nullable: true, example: null }
+
+    SalesReportRM:
+      type: object
+      properties:
+        date:         { type: string,  example: "2026-08-15" }
+        salesCount:   { type: integer, example: 42 }
+        revenueTotal: { type: integer, example: 1234500000, description: "Sum of total_amount (minor units)" }
+        currency:     { type: string,  example: "IDR" }
+
+    CommissionSummaryRM:
+      type: object
+      properties:
+        date:                { type: string,  example: "2026-08-15" }
+        completedSalesCount: { type: integer, example: 42 }
+        totalCommission:     { type: integer, example: 37035000, description: "Sum of commission_amount (minor units)" }
+        currency:            { type: string,  example: "IDR" }
+
+    # ── Error envelope (returned by exception handlers in bootstrap/app.php)
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:   { type: string }
+        message: { type: string }
+
+  responses:
+
+    ValidationError:
+      description: |
+        `422 Unprocessable Entity` — Request payload is well-formed but semantically invalid
+        (missing required fields, unknown enum value, malformed ULID, invalid date, etc.).
       content:
         application/json:
-          schema:
-            type: object
-            properties:
-              message:
-                type: string
-                example: "Cannot confirm a completed sale"
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            missing_field:
+              value: { error: "validation_failed", message: "payment_method is required" }
+            unknown_enum:
+              value: { error: "validation_failed", message: "Invalid payment method 'bitcoin'. Allowed: credit_card, bank_transfer, e_wallet, cash." }
+
+    PaymentFailed:
+      description: |
+        `402 Payment Required` — The payment gateway rejected the payment (e.g. insufficient funds,
+        card declined). The sale remains in `PENDING`; the client can retry with a different method.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: "payment_failed"
+            message: "Insufficient funds"
+
+    PaymentGatewayError:
+      description: |
+        `502 Bad Gateway` — The payment gateway is unreachable or returned an unexpected error.
+        The sale remains in `PENDING`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: "payment_gateway_error"
+            message: "Payment gateway error: cURL error 28"
 
     NotFound:
-      description: Resource not found
+      description: '`404 Not Found` — Sale does not exist.'
       content:
         application/json:
-          schema:
-            type: object
-            properties:
-              message:
-                type: string
-                example: "Sale not found"
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: "sale_not_found"
+            message: "Sale with id 01ARZ3NDEKTSV4RRFFQ69G5FAX was not found"
 
-tags:
-  - name: Customers
-    description: Customer management endpoints
-  - name: Products
-    description: Product management endpoints
-  - name: Sales
-    description: |
-      Sales Order lifecycle operations.
-      
-      **Status Flow:**
-      ```
-      PENDING → CONFIRMED → COMPLETED
-            ↘
-             CANCELLED (only from PENDING)
-      ```
-      
-      **DDD Concepts in Sales:**
-      - **Aggregate Root**: Sale
-      - **Value Objects**: SaleId, CustomerId, ProductId, Money, LineItem, OrderStatus
-      - **Business Rules**: Minimum amount, max line items, state transitions
-      - **Ubiquitous Language**: create, confirm, complete, cancel
+    InvalidSaleState:
+      description: |
+        `409 Conflict` — The requested transition is not allowed from the current status.
+        Examples: confirming an already-CONFIRMED sale, completing a PENDING sale,
+        cancelling a COMPLETED sale.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: "invalid_sale_state"
+            message: "Sale cannot be confirmed: status is 'completed'"

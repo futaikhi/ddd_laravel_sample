@@ -19,8 +19,6 @@ return new class extends Migration {
             $table->decimal('commission_rate', 5, 2)->nullable()->after('commission_amount');
             $table->string('commission_currency', 10)->nullable()->after('commission_rate');
 
-            // Handy for reporting queries (GetSalesReport / GetCommissionSummary)
-            $table->timestamp('created_at')->nullable()->after('cancellation_reason');
         });
     }
 
@@ -33,7 +31,6 @@ return new class extends Migration {
                 'commission_amount',
                 'commission_rate',
                 'commission_currency',
-                'created_at',
             ]);
         });
     }

@@ -12,6 +12,8 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Src\Sales\Domain\Exceptions\CustomerNotFoundException;
+use Src\Sales\Domain\Exceptions\ProductNotFoundException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCancelledException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCompletedException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
@@ -74,6 +76,26 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'error'   => 'sale_not_found',
+                    'message' => $e->getMessage(),
+                ], 404);
+            }
+            return null;
+        });
+
+        $exceptions->render(function (CustomerNotFoundException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'customer_not_found',
+                    'message' => $e->getMessage(),
+                ], 404);
+            }
+            return null;
+        });
+
+        $exceptions->render(function (ProductNotFoundException $e, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error'   => 'product_not_found',
                     'message' => $e->getMessage(),
                 ], 404);
             }
