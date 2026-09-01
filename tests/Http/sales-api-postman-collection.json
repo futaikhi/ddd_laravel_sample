@@ -1,0 +1,227 @@
+{
+  "info": {
+    "name": "Sales Order DDD API",
+    "description": "API untuk Sales Order Processing dengan Domain-Driven Design",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "Create Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/api/customers",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["api", "customers"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PT Maju Jaya\",\n  \"email\": \"contact@majujaya.com\",\n  \"phone\": \"021-555-1234\"\n}"
+            },
+            "description": "Create a new customer. Returns customer ID (ULID) for use in sales orders."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "body": "{\n  \"id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\n  \"message\": \"Customer created successfully\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/api/products",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["api", "products"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Laptop Dell XPS 15\",\n  \"sku\": \"DEL-XPS15-2024\",\n  \"price\": 15000000,\n  \"currency\": \"IDR\"\n}"
+            },
+            "description": "Create a new product with price in cents. Price is used as the source of truth for sales line items."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "body": "{\n  \"id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\n  \"message\": \"Product created successfully\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sales Orders",
+      "item": [
+        {
+          "name": "1. Create Sale (PENDING)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/api/sales",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["api", "sales"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\n  \"line_items\": [\n    {\n      \"product_id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\n      \"quantity\": 2\n    },\n    {\n      \"product_id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAX\",\n      \"quantity\": 5\n    }\n  ]\n}"
+            },
+            "description": "Create a new sale order.\n\nBusiness Rules Validated:\n- Minimum order amount: Rp 50,000 (50000 in cents)\n- Maximum line items: 20\n- All products must exist in database\n- Customer must exist in database\n- Product prices are fetched from database (source of truth)\n\nStatus: PENDING (initial state)\nResponse: Sale ID (ULID) for use in subsequent operations"
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "body": "{\n  \"id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAX\",\n  \"message\": \"Sale created successfully\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "2. Confirm Sale (PENDING → CONFIRMED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/api/sales/01ARZ3NDEKTSV4RRFFQ69G5FAX/confirm",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["api", "sales", "01ARZ3NDEKTSV4RRFFQ69G5FAX", "confirm"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Confirm a pending sale order (move to CONFIRMED status).\n\nValid Transitions:\n- PENDING → CONFIRMED (allowed)\n- Any other state → CONFIRMED (error: InvalidStateException)\n\nBusiness Logic:\n- Payment gateway processes the payment\n- Sale status is locked to CONFIRMED\n- Events: SaleConfirmedEvent published"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "body": "{\n  \"id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAX\",\n  \"message\": \"Sale confirmed successfully\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "3. Complete Sale (CONFIRMED → COMPLETED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/api/sales/01ARZ3NDEKTSV4RRFFQ69G5FAX/complete",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["api", "sales", "01ARZ3NDEKTSV4RRFFQ69G5FAX", "complete"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Complete a confirmed sale order (move to COMPLETED status).\n\nValid Transitions:\n- CONFIRMED → COMPLETED (allowed)\n- Any other state → COMPLETED (error: InvalidStateException)\n\nBusiness Logic:\n- Commission is calculated:\n  • Amount > Rp 1,000,000: 5% commission\n  • Amount ≤ Rp 1,000,000: 3% commission\n- Events: SaleCompletedEvent published"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "body": "{\n  \"id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAX\",\n  \"message\": \"Sale completed successfully\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "4. Cancel Sale (PENDING → CANCELLED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8000/api/sales/01ARZ3NDEKTSV4RRFFQ69G5FAX/cancel",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["api", "sales", "01ARZ3NDEKTSV4RRFFQ69G5FAX", "cancel"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer requested cancellation\"\n}"
+            },
+            "description": "Cancel a pending sale order (move to CANCELLED status).\n\nValid Transitions:\n- PENDING → CANCELLED (allowed)\n- Any other state → CANCELLED (error: Cannot cancel non-pending sale)\n\nBusiness Logic:\n- Sale is marked as CANCELLED\n- No payment is processed\n- Events: SaleCancelledEvent published"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "body": "{\n  \"id\": \"01ARZ3NDEKTSV4RRFFQ69G5FAX\",\n  \"message\": \"Sale cancelled successfully\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "type": "string"
+    },
+    {
+      "key": "product_id_1",
+      "value": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      "type": "string"
+    },
+    {
+      "key": "sale_id",
+      "value": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      "type": "string"
+    }
+  ]
+}
