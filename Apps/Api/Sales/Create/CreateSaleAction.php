@@ -26,19 +26,21 @@ final readonly class CreateSaleAction
             throw new \RuntimeException('Customer does not exist.');
         }
 
-        $lineItems = array_map(function (LineItemInputDto $item): LineItem {
+        /** @var list<LineItem> $lineItems */
+        $lineItems = [];
+        foreach ($dto->lineItems as $item) {
             $product = \App\Models\Product::query()->find($item->productId);
 
             if ($product === null) {
                 throw new \RuntimeException('Product does not exist: '.$item->productId);
             }
 
-            return new LineItem(
+            $lineItems[] = new LineItem(
                 productId: ProductId::fromString($item->productId),
                 quantity: $item->quantity,
                 unitPrice: new Money((int) $product->price, (string) $product->currency),
             );
-        }, $dto->lineItems);
+        }
 
         $this->commandBus->dispatch(new CreateSaleCommand(
             id: $dto->id,

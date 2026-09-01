@@ -52,27 +52,46 @@ final class SaleRepository implements SaleRepositoryInterface
             return null;
         }
 
-        $lineItems = array_map(
-            fn (SaleLineItemModel $item): LineItem => new LineItem(
-                productId: ProductId::fromString($item->product_id),
+        /** @var list<LineItem> $lineItems */
+        $lineItems = [];
+        /** @var SaleLineItemModel $item */
+        foreach ($model->lineItems as $item) {
+            $lineItems[] = new LineItem(
+                productId: ProductId::fromString((string) $item->product_id),
                 quantity: (int) $item->quantity,
                 unitPrice: new Money((int) $item->unit_price, (string) $item->currency),
-            ),
-            $model->lineItems->all()
-        );
+            );
+        }
 
         return Sale::reconstitute(
-            id: SaleId::fromString($model->id),
-            customerId: CustomerId::fromString($model->customer_id),
+            id: SaleId::fromString((string) $model->id),
+            customerId: CustomerId::fromString((string) $model->customer_id),
             lineItems: $lineItems,
-            status: OrderStatus::from($model->status),
+            status: OrderStatus::from((string) $model->status),
             totalAmount: new Money((int) $model->total_amount, 'IDR'),
-            createdAt: $model->created_at ? new \DateTimeImmutable($model->created_at) : new \DateTimeImmutable(),
-            confirmedAt: $model->confirmed_at ? new \DateTimeImmutable($model->confirmed_at) : null,
-            cancelledAt: $model->cancelled_at ? new \DateTimeImmutable($model->cancelled_at) : null,
-            cancellationReason: $model->cancellation_reason,
-            completedAt: $model->completed_at ? new \DateTimeImmutable($model->completed_at) : null,
+            createdAt: new \DateTimeImmutable(),
+            confirmedAt: $this->toDateTimeImmutable($model->confirmed_at),
+            cancelledAt: $this->toDateTimeImmutable($model->cancelled_at),
+            cancellationReason: $model->cancellation_reason !== null ? (string) $model->cancellation_reason : null,
+            completedAt: $this->toDateTimeImmutable($model->completed_at),
         );
+    }
+
+    private function toDateTimeImmutable(mixed $value): ?\DateTimeImmutable
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value);
+        }
+
+        if (is_string($value)) {
+            return new \DateTimeImmutable($value);
+        }
+
+        return null;
     }
 
     public function getById(SaleId $id): Sale
