@@ -21,12 +21,14 @@ use Src\Sales\Infrastructure\Payment\LaravelPaymentGatewayAdapter;
 use Src\Sales\Infrastructure\Payment\MockPaymentGatewayAdapter;
 use Src\Sales\Infrastructure\Persistence\SaleReadModelRepository;
 use Src\Sales\Infrastructure\Persistence\SaleRepository;
+use Src\Shared\Framework\Domain\Events\DomainEventStoreInterface;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandBusInterface;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\SimpleCommandBus;
 use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 use Src\Shared\Framework\Infrastructure\Bus\EventBus\SimpleEventBus;
 use Src\Shared\Framework\Infrastructure\Bus\QueryBus\QueryBus;
 use Src\Shared\Framework\Infrastructure\Bus\QueryBus\QueryBusInterface;
+use Src\Shared\Framework\Infrastructure\Events\EloquentDomainEventStore;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -36,6 +38,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(QueryBusInterface::class, QueryBus::class);
         $this->app->bind(CommandBusInterface::class, SimpleCommandBus::class);
         $this->app->bind(EventBusInterface::class, SimpleEventBus::class);
+        $this->app->bind(DomainEventStoreInterface::class, EloquentDomainEventStore::class);
 
         // Reservation repositories
         $this->app->bind(BookingRepositoryInterface::class, BookingRepository::class);

@@ -7,7 +7,11 @@ namespace Src\Shared\Framework\Infrastructure\Bus\EventBus;
 use Src\Shared\Framework\Domain\Events\DomainEvent;
 
 /**
- * Simple event bus that dispatches events via Laravel's event system.
+ * Event bus dispatches domain events through Laravel event system.
+ *
+ * Dispatch mode is configurable with `sales.events.dispatch_mode`:
+ * - `sync`: listeners execute in current request/job.
+ * - `async`: one queue job is dispatched per domain event.
  */
 final class SimpleEventBus implements EventBusInterface
 {
@@ -16,7 +20,16 @@ final class SimpleEventBus implements EventBusInterface
      */
     public function publishEvents(array $events): void
     {
+        $async = config('sales.events.dispatch_mode', 'sync') === 'async';
+        $queue = (string) config('sales.events.queue', 'domain-events');
+
         foreach ($events as $event) {
+            if ($async) {
+                DomainEventJob::dispatch($event)->onQueue($queue);
+
+                continue;
+            }
+
             event($event);
         }
     }
