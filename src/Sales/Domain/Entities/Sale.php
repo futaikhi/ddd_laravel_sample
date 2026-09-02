@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Src\Sales\Domain\Entities;
 
 use DateTimeImmutable;
+use InvalidArgumentException;
 use Src\Sales\Domain\Enums\OrderStatus;
 use Src\Sales\Domain\Enums\PaymentMethod;
 use Src\Sales\Domain\Events\SaleCancelledEvent;
@@ -25,7 +26,6 @@ use Src\Shared\Framework\Domain\Entities\BaseEntity;
 final class Sale extends BaseEntity
 {
     private const MINIMUM_ORDER_AMOUNT = 50000;
-    private const MAX_LINE_ITEMS = 20;
 
     /**
      * @param list<LineItem> $lineItems
@@ -33,14 +33,14 @@ final class Sale extends BaseEntity
     private function __construct(
         private readonly SaleId $id,
         private readonly CustomerId $customerId,
-        private array $lineItems,
-        private OrderStatus $status,
+        private readonly array $lineItems,
         private Money $totalAmount,
+        private OrderStatus $status,
         private readonly DateTimeImmutable $createdAt,
         private ?DateTimeImmutable $confirmedAt = null,
+        private ?DateTimeImmutable $completedAt = null,
         private ?DateTimeImmutable $cancelledAt = null,
         private ?string $cancellationReason = null,
-        private ?DateTimeImmutable $completedAt = null,
         private ?PaymentMethod $paymentMethod = null,
         private ?string $transactionId = null,
         private ?Commission $commission = null,
@@ -53,32 +53,37 @@ final class Sale extends BaseEntity
     public static function create(SaleId $id, CustomerId $customerId, array $lineItems): self
     {
         if ($lineItems === []) {
-            throw new \InvalidArgumentException('A sale must contain at least one line item.');
+            throw new InvalidArgumentException('Sale must have at least one line item');
         }
 
-        if (count($lineItems) > self::MAX_LINE_ITEMS) {
-            throw new \InvalidArgumentException('A sale cannot contain more than 20 line items.');
+        if (count($lineItems) > 20) {
+            throw new InvalidArgumentException('Sale cannot have more than 20 line items');
         }
 
-        $total = Money::zero();
+        $totalAmount = Money::zero();
+
         foreach ($lineItems as $lineItem) {
-            $total = $total->add($lineItem->getTotal());
+            if (! $lineItem instanceof LineItem) {
+                throw new InvalidArgumentException('Line items must be LineItem instances');
+            }
+
+            $totalAmount = $totalAmount->add($lineItem->getTotal());
         }
 
-        if ($total->getValue() < self::MINIMUM_ORDER_AMOUNT) {
-            throw MinimumOrderAmountException::belowMinimum($total->getValue(), self::MINIMUM_ORDER_AMOUNT);
+        if ($totalAmount->getValue() < self::MINIMUM_ORDER_AMOUNT) {
+            throw MinimumOrderAmountException::belowMinimum(
+                $totalAmount->getValue(),
+                self::MINIMUM_ORDER_AMOUNT,
+            );
         }
 
         $sale = new self(
             id: $id,
             customerId: $customerId,
             lineItems: $lineItems,
+            totalAmount: $totalAmount,
             status: OrderStatus::PENDING,
-            totalAmount: $total,
             createdAt: new DateTimeImmutable(),
-            paymentMethod: null,
-            transactionId: null,
-            commission: null,
         );
 
         $sale->recordLast(SaleCreatedEvent::fromEntity($sale));
@@ -93,44 +98,34 @@ final class Sale extends BaseEntity
         SaleId $id,
         CustomerId $customerId,
         array $lineItems,
-        OrderStatus $status,
         Money $totalAmount,
-        ?DateTimeImmutable $createdAt = null,
+        OrderStatus $status,
+        DateTimeImmutable $createdAt,
         ?DateTimeImmutable $confirmedAt = null,
+        ?DateTimeImmutable $completedAt = null,
         ?DateTimeImmutable $cancelledAt = null,
         ?string $cancellationReason = null,
-        ?DateTimeImmutable $completedAt = null,
         ?PaymentMethod $paymentMethod = null,
         ?string $transactionId = null,
         ?Commission $commission = null,
     ): self {
-        $sale = new self(
+        return new self(
             id: $id,
             customerId: $customerId,
             lineItems: $lineItems,
-            status: $status,
             totalAmount: $totalAmount,
-            createdAt: $createdAt ?? new DateTimeImmutable(),
+            status: $status,
+            createdAt: $createdAt,
             confirmedAt: $confirmedAt,
+            completedAt: $completedAt,
             cancelledAt: $cancelledAt,
             cancellationReason: $cancellationReason,
-            completedAt: $completedAt,
             paymentMethod: $paymentMethod,
             transactionId: $transactionId,
             commission: $commission,
         );
-
-        return $sale;
     }
 
-    /**
-     * Confirm the sale after payment has been captured.
-     *
-     * Orchestration of the payment call lives in the Application layer
-     * (see ConfirmSaleHandler + PaymentGatewayInterface). The gateway
-     * result (transactionId + paymentMethod) is handed to this aggregate
-     * so the domain stays the single source of truth for the sale state.
-     */
     public function confirm(PaymentMethod $paymentMethod, string $transactionId): void
     {
         if ($this->status !== OrderStatus::PENDING) {
@@ -145,10 +140,6 @@ final class Sale extends BaseEntity
         $this->recordLast(SaleConfirmedEvent::fromEntity($this));
     }
 
-    /**
-     * Complete the sale and lock the commission calculated by the
-     * CommissionCalculatorInterface port (called from CompleteSaleHandler).
-     */
     public function complete(Commission $commission): void
     {
         if ($this->status !== OrderStatus::CONFIRMED) {
@@ -168,7 +159,7 @@ final class Sale extends BaseEntity
             throw SaleCannotBeCancelledException::alreadyCancelled();
         }
 
-        if ($this->status !== OrderStatus::PENDING) {
+        if (! $this->isCancellable()) {
             throw SaleCannotBeCancelledException::invalidStatus($this->status->value);
         }
 
@@ -239,7 +230,11 @@ final class Sale extends BaseEntity
 
     public function isCancellable(): bool
     {
-        return $this->status === OrderStatus::PENDING;
+        return in_array(
+            $this->status,
+            [OrderStatus::PENDING, OrderStatus::CONFIRMED],
+            true,
+        );
     }
 
     public function getPaymentMethod(): ?PaymentMethod

@@ -17,6 +17,7 @@ use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
+use Src\Sales\Domain\ValueObjects\PaymentRequest;
 use Src\Sales\Domain\ValueObjects\PaymentResult;
 use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
@@ -27,12 +28,11 @@ final class ConfirmSaleHandlerTest extends TestCase
 {
     public function test_it_confirms_sale_when_payment_succeeds(): void
     {
-        $sale        = $this->makeSale();
-        $repo        = $this->makeRepo($sale);
-        $paymentPort = new MockPaymentGatewayAdapter(); // succeeds by default
-        $eventBus    = $this->createMock(EventBusInterface::class);
+        $sale = $this->makeSale();
+        $repo = $this->makeRepo($sale);
+        $paymentPort = new MockPaymentGatewayAdapter();
+        $eventBus = $this->createMock(EventBusInterface::class);
 
-        // Assert events are published (created + confirmed events)
         $eventBus->expects($this->once())->method('publishEvents');
 
         $handler = new ConfirmSaleHandler($repo, $paymentPort, $eventBus);
@@ -45,12 +45,13 @@ final class ConfirmSaleHandlerTest extends TestCase
         $this->assertSame(PaymentMethod::CREDIT_CARD, $sale->getPaymentMethod());
         $this->assertNotNull($sale->getTransactionId());
         $this->assertStringStartsWith('MOCK-', $sale->getTransactionId() ?? '');
+        $this->assertTrue($repo->stored);
     }
 
     public function test_it_throws_and_keeps_sale_pending_when_payment_fails(): void
     {
-        $sale        = $this->makeSale();
-        $repo        = $this->makeRepo($sale, expectStore: false);
+        $sale = $this->makeSale();
+        $repo = $this->makeRepo($sale, expectStore: false);
         $paymentPort = new MockPaymentGatewayAdapter();
         $paymentPort->setShouldSucceed(false);
         $paymentPort->setFailureMessage('Insufficient funds');
@@ -69,23 +70,26 @@ final class ConfirmSaleHandlerTest extends TestCase
             $this->assertSame('Insufficient funds', $e->getMessage());
         }
 
-        // Sale must remain PENDING after payment failure
         $this->assertSame(OrderStatus::PENDING, $sale->getStatus());
         $this->assertNull($sale->getTransactionId());
         $this->assertNull($sale->getPaymentMethod());
+        $this->assertFalse($repo->stored);
     }
 
     public function test_it_uses_payment_result_transaction_id_on_sale(): void
     {
-        $sale     = $this->makeSale();
-        $repo     = $this->makeRepo($sale);
+        $sale = $this->makeSale();
+        $repo = $this->makeRepo($sale);
         $eventBus = $this->createMock(EventBusInterface::class);
 
-        // Custom payment gateway that returns a fixed transaction id.
         $paymentPort = new class implements PaymentGatewayInterface {
-            public function process(\Src\Sales\Domain\ValueObjects\PaymentRequest $request): PaymentResult
+            public function process(PaymentRequest $request): PaymentResult
             {
                 return PaymentResult::success('TXN-FIXED-999', $request->getAmount(), 'ok');
+            }
+
+            public function refund(string $transactionId): void
+            {
             }
         };
 
@@ -97,6 +101,7 @@ final class ConfirmSaleHandlerTest extends TestCase
 
         $this->assertSame('TXN-FIXED-999', $sale->getTransactionId());
         $this->assertSame(PaymentMethod::BANK_TRANSFER, $sale->getPaymentMethod());
+        $this->assertTrue($repo->stored);
     }
 
     public function test_it_does_not_call_payment_gateway_when_sale_is_not_pending(): void
@@ -108,6 +113,7 @@ final class ConfirmSaleHandlerTest extends TestCase
 
         $paymentGateway = $this->createMock(PaymentGatewayInterface::class);
         $paymentGateway->expects($this->never())->method('process');
+        $paymentGateway->expects($this->never())->method('refund');
 
         $eventBus = $this->createMock(EventBusInterface::class);
         $eventBus->expects($this->never())->method('publishEvents');
@@ -135,10 +141,17 @@ final class ConfirmSaleHandlerTest extends TestCase
     {
         return new class ($sale, $expectStore) implements SaleRepositoryInterface {
             public bool $stored = false;
-            public function __construct(private Sale $sale, private bool $expectStore) {}
 
-            public function store(\Src\Sales\Domain\Entities\Sale $sale): void
+            public function __construct(private Sale $sale, private bool $expectStore)
             {
+            }
+
+            public function store(Sale $sale): void
+            {
+                if (! $this->expectStore) {
+                    TestCase::fail('Repository store should not be called.');
+                }
+
                 $this->stored = true;
             }
 

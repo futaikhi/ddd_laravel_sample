@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace Src\Sales\Domain\ValueObjects;
 
+use InvalidArgumentException;
+
 final class Money
 {
     public function __construct(
         public readonly int $amount,
         public readonly string $currency = 'IDR',
     ) {
-        if ($amount < 0) {
-            throw new \InvalidArgumentException('Money amount cannot be negative');
+        if ($this->amount < 0) {
+            throw new InvalidArgumentException('Money amount cannot be negative');
         }
     }
 
@@ -42,12 +44,10 @@ final class Money
         return $this->amount;
     }
 
-    public function ensureSameCurrency(self $other): void
+    private function ensureSameCurrency(self $other): void
     {
         if ($this->currency !== $other->currency) {
-            throw new \InvalidArgumentException(
-                sprintf('Cannot operate on different currencies: %s and %s', $this->currency, $other->currency)
-            );
+            throw new InvalidArgumentException('Cannot operate with different currencies');
         }
     }
 }

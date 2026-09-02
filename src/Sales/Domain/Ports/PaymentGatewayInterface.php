@@ -10,10 +10,18 @@ use Src\Sales\Domain\ValueObjects\PaymentResult;
 interface PaymentGatewayInterface
 {
     /**
-     * Process a payment request and return the result
+     * Process payment request and return payment result.
      *
      * @throws PaymentFailedException
      * @throws PaymentGatewayException
      */
     public function process(PaymentRequest $request): PaymentResult;
+
+    /**
+     * Refund captured payment transaction.
+     *
+     * @throws PaymentFailedException
+     * @throws PaymentGatewayException
+     */
+    public function refund(string $transactionId): void;
 }

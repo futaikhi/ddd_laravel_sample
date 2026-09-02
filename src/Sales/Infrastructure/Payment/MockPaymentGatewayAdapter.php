@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Src\Sales\Infrastructure\Payment;
 
+use Src\Sales\Domain\Ports\PaymentFailedException;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\ValueObjects\PaymentRequest;
 use Src\Sales\Domain\ValueObjects\PaymentResult;
@@ -11,31 +12,29 @@ use Src\Sales\Domain\ValueObjects\PaymentResult;
 final class MockPaymentGatewayAdapter implements PaymentGatewayInterface
 {
     private bool $shouldSucceed = true;
+
+    private bool $refundShouldSucceed = true;
+
     private string $failureMessage = 'Payment failed';
 
-    public function __construct()
-    {
-    }
+    /** @var list<string> */
+    private array $refundedTransactionIds = [];
 
-    /**
-     * Set whether the next payment should succeed or fail
-     */
     public function setShouldSucceed(bool $shouldSucceed): void
     {
         $this->shouldSucceed = $shouldSucceed;
     }
 
-    /**
-     * Set failure message for failed payments
-     */
+    public function setRefundShouldSucceed(bool $refundShouldSucceed): void
+    {
+        $this->refundShouldSucceed = $refundShouldSucceed;
+    }
+
     public function setFailureMessage(string $message): void
     {
         $this->failureMessage = $message;
     }
 
-    /**
-     * Process a payment request (mock implementation)
-     */
     public function process(PaymentRequest $request): PaymentResult
     {
         $transactionId = 'MOCK-' . bin2hex(random_bytes(8));
@@ -44,23 +43,43 @@ final class MockPaymentGatewayAdapter implements PaymentGatewayInterface
             return PaymentResult::success(
                 $transactionId,
                 $request->getAmount(),
-                'Mock payment successful'
+                'Mock payment successful',
             );
         }
 
         return PaymentResult::failed(
             $transactionId,
             $request->getAmount(),
-            $this->failureMessage
+            $this->failureMessage,
         );
     }
 
+    public function refund(string $transactionId): void
+    {
+        if ($transactionId === '') {
+            throw PaymentFailedException::withMessage('Transaction id is required for refund');
+        }
+
+        if (! $this->refundShouldSucceed) {
+            throw PaymentFailedException::withMessage($this->failureMessage);
+        }
+
+        $this->refundedTransactionIds[] = $transactionId;
+    }
+
     /**
-     * Reset to default successful state
+     * @return list<string>
      */
+    public function getRefundedTransactionIds(): array
+    {
+        return $this->refundedTransactionIds;
+    }
+
     public function reset(): void
     {
         $this->shouldSucceed = true;
+        $this->refundShouldSucceed = true;
         $this->failureMessage = 'Payment failed';
+        $this->refundedTransactionIds = [];
     }
 }

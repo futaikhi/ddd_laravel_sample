@@ -21,7 +21,7 @@ final readonly class LineItem
             throw new InvalidArgumentException('Quantity must be greater than zero');
         }
 
-        if ($this->unitPrice->amount <= 0) {
+        if ($this->unitPrice->getValue() <= 0) {
             throw new InvalidArgumentException('Unit price must be greater than zero');
         }
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Src\Sales\Domain\ValueObjects;
 
+use InvalidArgumentException;
+
 final class PaymentResult
 {
     public function __construct(
@@ -12,8 +14,8 @@ final class PaymentResult
         private readonly Money $amount,
         private readonly string $message = '',
     ) {
-        if (!in_array($status, ['success', 'failed', 'pending'], true)) {
-            throw new \InvalidArgumentException("Invalid payment status: {$status}");
+        if (! in_array($status, ['success', 'failed', 'pending'], true)) {
+            throw new InvalidArgumentException("Invalid payment status: {$status}");
         }
     }
 

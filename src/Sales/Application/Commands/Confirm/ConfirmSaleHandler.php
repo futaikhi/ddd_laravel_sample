@@ -22,24 +22,10 @@ final readonly class ConfirmSaleHandler implements CommandHandlerInterface
     ) {
     }
 
-    /**
-     * Orchestrates:
-     * 1. Load sale aggregate
-     * 2. Call payment gateway (hexagonal port)
-     * 3. If payment succeeded, transition aggregate to CONFIRMED
-     * 4. Persist + publish events
-     *
-     * On payment failure the aggregate stays PENDING and the exception
-     * propagates so the HTTP layer can return a 402 (Payment Required).
-     */
     public function __invoke(ConfirmSaleCommand $command): void
     {
         $sale = $this->repository->getById($command->id);
 
-        // Guard before payment processing: never validate/process payment
-        // if the sale is already confirmed/completed/cancelled. The aggregate
-        // still owns the invariant in confirm(); this is a safety check to
-        // avoid duplicate payment records on retries.
         if ($sale->getStatus() !== OrderStatus::PENDING) {
             throw SaleCannotBeConfirmedException::notPending($sale->getStatus()->value);
         }
@@ -48,20 +34,19 @@ final readonly class ConfirmSaleHandler implements CommandHandlerInterface
             saleId: $sale->getId()->getValue(),
             amount: $sale->getTotalAmount(),
             currency: $sale->getTotalAmount()->currency,
-            description: "Payment for sale {$sale->getId()->getValue()}",
+            description: "Payment sale {$sale->getId()->getValue()}",
         ));
 
-        if (!$paymentResult->isSuccess()) {
+        if (! $paymentResult->isSuccess()) {
             throw PaymentFailedException::withMessage($paymentResult->getMessage());
         }
 
         $sale->confirm(
-            paymentMethod: $command->paymentMethod, // already a PaymentMethod enum
+            paymentMethod: $command->paymentMethod,
             transactionId: $paymentResult->getTransactionId(),
         );
 
         $this->repository->store($sale);
-
         $this->eventBus->publishEvents($sale->releaseEvents());
     }
 }

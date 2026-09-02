@@ -297,7 +297,7 @@ paths:
 
   /sales/{id}/cancel:
     post:
-      summary: Cancel sale (PENDING → CANCELLED)
+      summary: Cancel sale (PENDING || CONFIRMED → CANCELLED)
       description: |
         Allowed only from `PENDING`. `CONFIRMED`, `COMPLETED`, and `CANCELLED` sales cannot be cancelled.
 
