@@ -8,7 +8,9 @@ use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvi
 use Src\Sales\Application\EventHandlers\CalculateCommissionHandler;
 use Src\Sales\Application\EventHandlers\LogAuditTrailHandler;
 use Src\Sales\Application\EventHandlers\SendConfirmationEmailHandler;
+use Src\Sales\Application\EventHandlers\UpdateCommissionProjectionHandler;
 use Src\Sales\Application\EventHandlers\UpdateSalesMetricsHandler;
+use Src\Sales\Domain\Events\CommissionCalculatedEvent;
 use Src\Sales\Domain\Events\SaleCancelledEvent;
 use Src\Sales\Domain\Events\SaleCompletedEvent;
 use Src\Sales\Domain\Events\SaleConfirmedEvent;
@@ -30,6 +32,10 @@ class EventServiceProvider extends ServiceProvider
         SaleCompletedEvent::class => [
             UpdateSalesMetricsHandler::class,
             CalculateCommissionHandler::class,
+            LogAuditTrailHandler::class,
+        ],
+        CommissionCalculatedEvent::class => [
+            UpdateCommissionProjectionHandler::class,
             LogAuditTrailHandler::class,
         ],
         SaleCancelledEvent::class => [

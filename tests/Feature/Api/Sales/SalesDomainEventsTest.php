@@ -79,6 +79,18 @@ final class SalesDomainEventsTest extends TestCase
         $payload = json_decode((string) $event->event_data, true, 512, JSON_THROW_ON_ERROR);
         $completedDate = substr((string) $payload['completedAt'], 0, 10);
 
+        $commissionEvent = DB::table('domain_events')
+            ->where('aggregate_id', $saleId)
+            ->where('event_name', 'commission.calculated')
+            ->first();
+
+        $this->assertNotNull($commissionEvent);
+
+        $commissionPayload = json_decode((string) $commissionEvent->event_data, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(3000, $commissionPayload['amount']);
+        $this->assertEqualsWithDelta(3.0, (float) $commissionPayload['percentage'], 0.001);
+        $this->assertSame('IDR', $commissionPayload['currency']);
+
         $this->assertSame(1, Cache::get("sales.metrics.{$completedDate}.completed_count"));
         $this->assertSame(100000, Cache::get("sales.metrics.{$completedDate}.revenue_total"));
         $this->assertSame(1, Cache::get("sales.commission.{$completedDate}.completed_sales_count"));

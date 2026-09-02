@@ -4,33 +4,36 @@ declare(strict_types=1);
 
 namespace Src\Sales\Application\EventHandlers;
 
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Src\Sales\Domain\Events\CommissionCalculatedEvent;
 use Src\Sales\Domain\Events\SaleCompletedEvent;
+use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 /**
- * Updates commission reporting projection after a sale completion.
+ * Converts SaleCompletedEvent commission data into an explicit commission event.
  *
- * The aggregate already locks the commission on completion. This handler reacts
- * to the completion event and prepares reporting data as a side effect.
+ * The aggregate already locks commission when the sale is completed. This handler
+ * publishes CommissionCalculatedEvent so audit/projections can react to the more
+ * specific business fact without depending on SaleCompletedEvent semantics.
  */
 final readonly class CalculateCommissionHandler
 {
+    public function __construct(
+        private EventBusInterface $eventBus,
+    ) {
+    }
+
     public function handle(SaleCompletedEvent $event): void
     {
-        $date = substr($event->completedAt, 0, 10) ?: date('Y-m-d');
-        $prefix = "sales.commission.{$date}";
+        $commissionCalculated = CommissionCalculatedEvent::fromSaleCompleted($event);
 
-        Cache::increment("{$prefix}.completed_sales_count");
-        Cache::increment("{$prefix}.commission_total", $event->commissionAmount);
-        Cache::put("{$prefix}.currency", $event->commissionCurrency);
-
-        Log::info('Commission projection updated', [
-            'sale_id' => $event->saleId,
-            'date' => $date,
-            'commission_amount' => $event->commissionAmount,
-            'commission_rate' => $event->commissionRate,
-            'currency' => $event->commissionCurrency,
+        Log::info('Commission calculated event published', [
+            'sale_id' => $commissionCalculated->saleId,
+            'commission_amount' => $commissionCalculated->amount,
+            'commission_rate' => $commissionCalculated->percentage,
+            'currency' => $commissionCalculated->currency,
         ]);
+
+        $this->eventBus->publishEvents([$commissionCalculated]);
     }
 }
