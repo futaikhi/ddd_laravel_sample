@@ -10,7 +10,7 @@ namespace Src\Shared\Framework\Application\Queries;
 final readonly class PaginatedCollection
 {
     /**
-     * @param  array<int,T>  $items
+     * @param array<int, T> $items
      */
     public function __construct(
         public array $items = [],

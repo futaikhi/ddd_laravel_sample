@@ -16,53 +16,52 @@ use Src\Sales\Domain\ValueObjects\SaleId;
 use Src\Shared\Framework\Application\Queries\PaginatedCollection;
 
 /**
- * Pragmatic read adapter for Sales.
- *
- * Queries `sales` / `sale_line_items` directly (no denormalized projection
- * tables yet). When FR-004 introduces event projections, this adapter can
- * be swapped for one that reads from `sale_list_items`, `sales_report`,
- * etc. without touching handlers or queries.
+ * Read adapter for Sales CQRS read models.
  */
 final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
 {
     public function findDetail(SaleId $id): ?SaleDetailRM
     {
-        $model = SaleModel::with('lineItems')->find($id->getValue());
-        if ($model === null) {
+        $sale = DB::table('sale_list_items')
+            ->where('id', $id->getValue())
+            ->first();
+
+        if ($sale === null) {
             return null;
         }
 
         $lineItems = [];
-        /** @var SaleLineItemModel $item */
-        foreach ($model->lineItems as $item) {
-            $qty       = (int) $item->quantity;
-            $unitPrice = (int) $item->unit_price;
+        $rows = DB::table('sale_line_items')
+            ->where('sale_id', $id->getValue())
+            ->orderBy('product_id')
+            ->get();
+
+        foreach ($rows as $row) {
+            /** @var \stdClass $row */
+            $quantity = $this->rowInt($row, 'quantity');
+            $unitPrice = $this->rowInt($row, 'unit_price');
+
             $lineItems[] = new SaleLineItemRM(
-                productId: (string) $item->product_id,
-                quantity: $qty,
+                productId: $this->rowString($row, 'product_id'),
+                quantity: $quantity,
                 unitPrice: $unitPrice,
-                currency: (string) $item->currency,
-                lineTotal: $qty * $unitPrice,
+                currency: $this->rowStringOrNull($row, 'currency') ?? $this->rowString($sale, 'currency'),
+                lineTotal: $quantity * $unitPrice,
             );
         }
 
         return new SaleDetailRM(
-            id: (string) $model->id,
-            customerId: (string) $model->customer_id,
-            status: (string) $model->status,
-            totalAmount: (int) $model->total_amount,
-            currency: 'IDR',
+            id: $this->rowString($sale, 'id'),
+            customerId: $this->rowString($sale, 'customer_id'),
+            status: $this->rowString($sale, 'status'),
+            totalAmount: $this->rowInt($sale, 'total_amount'),
+            currency: $this->rowString($sale, 'currency'),
             lineItems: $lineItems,
-            paymentMethod: $model->payment_method !== null ? (string) $model->payment_method : null,
-            transactionId: $model->transaction_id !== null ? (string) $model->transaction_id : null,
-            commissionAmount: $model->commission_amount !== null ? (int) $model->commission_amount : null,
-            commissionRate: $model->commission_rate !== null ? (float) $model->commission_rate : null,
-            commissionCurrency: $model->commission_currency !== null ? (string) $model->commission_currency : null,
-            createdAt: $this->fmt($model->created_at),
-            confirmedAt: $this->fmtNullable($model->confirmed_at),
-            completedAt: $this->fmtNullable($model->completed_at),
-            cancelledAt: $this->fmtNullable($model->cancelled_at),
-            cancellationReason: $model->cancellation_reason !== null ? (string) $model->cancellation_reason : null,
+            createdAt: $this->fmtNullable($sale->created_at ?? null),
+            confirmedAt: $this->fmtNullable($sale->confirmed_at ?? null),
+            completedAt: $this->fmtNullable($sale->completed_at ?? null),
+            cancelledAt: $this->fmtNullable($sale->cancelled_at ?? null),
+            cancellationReason: $this->rowStringOrNull($sale, 'cancellation_reason'),
         );
     }
 
@@ -74,23 +73,25 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
         int $limit,
         int $offset,
     ): PaginatedCollection {
-        $query = SaleModel::query();
+        $query = DB::table('sale_list_items');
 
         if ($customerId !== null) {
             $query->where('customer_id', $customerId->getValue());
         }
+
         if ($status !== null) {
             $query->where('status', $status);
         }
+
         if ($dateFrom !== null) {
             $query->where('created_at', '>=', $dateFrom);
         }
+
         if ($dateTo !== null) {
             $query->where('created_at', '<=', $dateTo);
         }
 
         $total = (int) $query->count();
-
         $rows = $query
             ->orderByDesc('created_at')
             ->orderBy('id')
@@ -100,17 +101,18 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
 
         $items = [];
         foreach ($rows as $row) {
+            /** @var \stdClass $row */
             $items[] = new SaleListItemRM(
-                id: (string) $row->id,
-                customerId: (string) $row->customer_id,
-                status: (string) $row->status,
-                totalAmount: (int) $row->total_amount,
-                currency: 'IDR',
-                createdAt: $this->fmt($row->created_at),
+                id: $this->rowString($row, 'id'),
+                customerId: $this->rowString($row, 'customer_id'),
+                status: $this->rowString($row, 'status'),
+                totalAmount: $this->rowInt($row, 'total_amount'),
+                currency: $this->rowString($row, 'currency'),
+                createdAt: $this->fmt($row->created_at ?? null),
             );
         }
 
-        $page = $limit > 0 ? (int) floor($offset / $limit) + 1 : 1;
+        $page = $limit > 0 ? ((int) floor($offset / $limit)) + 1 : 1;
 
         return new PaginatedCollection(
             items: $items,
@@ -125,24 +127,22 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
      */
     public function salesReport(string $dateFrom, string $dateTo): array
     {
-        $rows = DB::table('sales')
-            ->selectRaw("DATE(completed_at) as date, COUNT(*) as sales_count, SUM(total_amount) as revenue_total")
-            ->where('status', 'completed')
-            ->whereBetween('completed_at', [$dateFrom, $dateTo])
-            ->groupBy('date')
-            ->orderBy('date')
+        $rows = DB::table('sales_reports')
+            ->whereBetween('report_date', [$dateFrom, $dateTo])
+            ->orderBy('report_date')
             ->get();
 
         $out = [];
         foreach ($rows as $row) {
             /** @var \stdClass $row */
             $out[] = new SalesReportRM(
-                date:         $this->rowString($row, 'date'),
-                salesCount:   $this->rowInt($row, 'sales_count'),
+                date: $this->rowString($row, 'report_date'),
+                salesCount: $this->rowInt($row, 'sales_count'),
                 revenueTotal: $this->rowInt($row, 'revenue_total'),
-                currency:     'IDR',
+                currency: $this->rowString($row, 'currency'),
             );
         }
+
         return $out;
     }
 
@@ -151,45 +151,204 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
      */
     public function commissionSummary(string $dateFrom, string $dateTo): array
     {
-        $rows = DB::table('sales')
-            ->selectRaw("DATE(completed_at) as date, COUNT(*) as sales_count, SUM(commission_amount) as commission_total, MAX(commission_currency) as currency")
-            ->where('status', 'completed')
-            ->whereNotNull('commission_amount')
-            ->whereBetween('completed_at', [$dateFrom, $dateTo])
-            ->groupBy('date')
-            ->orderBy('date')
+        $rows = DB::table('commission_reports')
+            ->where('period_start', '>=', $dateFrom)
+            ->where('period_end', '<=', $dateTo)
+            ->orderBy('period_start')
+            ->orderBy('period_end')
             ->get();
 
         $out = [];
         foreach ($rows as $row) {
             /** @var \stdClass $row */
-            $currency = $this->rowStringOrNull($row, 'currency') ?? 'IDR';
             $out[] = new CommissionSummaryRM(
-                date:                $this->rowString($row, 'date'),
-                completedSalesCount: $this->rowInt($row, 'sales_count'),
-                totalCommission:     $this->rowInt($row, 'commission_total'),
-                currency:            $currency,
+                date: $this->rowString($row, 'period_start'),
+                completedSalesCount: $this->rowInt($row, 'completed_sales_count'),
+                totalCommission: $this->rowInt($row, 'total_commission'),
+                currency: $this->rowString($row, 'currency'),
             );
         }
+
         return $out;
+    }
+
+    public function upsertSaleListItem(
+        string $saleId,
+        string $customerId,
+        ?string $customerName,
+        string $status,
+        int $totalAmount,
+        string $currency,
+        ?string $createdAt,
+    ): void {
+        $now = now();
+
+        DB::table('sale_list_items')->updateOrInsert(
+            ['id' => $saleId],
+            [
+                'customer_id' => $customerId,
+                'customer_name' => $customerName,
+                'status' => $status,
+                'total_amount' => $totalAmount,
+                'currency' => $currency,
+                'created_at' => $createdAt ?? $now,
+                'projected_at' => $now,
+            ],
+        );
+    }
+
+    public function updateSaleListItemStatus(
+        string $saleId,
+        string $status,
+        ?string $confirmedAt = null,
+        ?string $completedAt = null,
+        ?string $cancelledAt = null,
+        ?string $cancellationReason = null,
+    ): void {
+        $values = [
+            'status' => $status,
+            'projected_at' => now(),
+        ];
+
+        if ($confirmedAt !== null) {
+            $values['confirmed_at'] = $confirmedAt;
+        }
+
+        if ($completedAt !== null) {
+            $values['completed_at'] = $completedAt;
+        }
+
+        if ($cancelledAt !== null) {
+            $values['cancelled_at'] = $cancelledAt;
+        }
+
+        if ($cancellationReason !== null) {
+            $values['cancellation_reason'] = $cancellationReason;
+        }
+
+        DB::table('sale_list_items')
+            ->where('id', $saleId)
+            ->update($values);
+    }
+
+    public function incrementSalesReport(
+        string $reportDate,
+        int $salesCountDelta,
+        int $revenueDelta,
+        string $currency,
+    ): void {
+        DB::transaction(function () use ($reportDate, $salesCountDelta, $revenueDelta, $currency): void {
+            $existing = DB::table('sales_reports')
+                ->where('report_date', $reportDate)
+                ->lockForUpdate()
+                ->first();
+
+            $now = now();
+
+            if ($existing === null) {
+                DB::table('sales_reports')->insert([
+                    'report_date' => $reportDate,
+                    'sales_count' => max(0, $salesCountDelta),
+                    'revenue_total' => max(0, $revenueDelta),
+                    'currency' => $currency,
+                    'projected_at' => $now,
+                ]);
+
+                return;
+            }
+
+            DB::table('sales_reports')
+                ->where('report_date', $reportDate)
+                ->update([
+                    'sales_count' => (int) $existing->sales_count + $salesCountDelta,
+                    'revenue_total' => (int) $existing->revenue_total + $revenueDelta,
+                    'currency' => $currency,
+                    'projected_at' => $now,
+                ]);
+        });
+    }
+
+    public function incrementCommissionSummary(
+        ?string $agentId,
+        string $periodStart,
+        string $periodEnd,
+        int $completedSalesCountDelta,
+        int $totalCommissionDelta,
+        string $currency,
+    ): void {
+        DB::transaction(function () use (
+            $agentId,
+            $periodStart,
+            $periodEnd,
+            $completedSalesCountDelta,
+            $totalCommissionDelta,
+            $currency,
+        ): void {
+            $query = DB::table('commission_reports')
+                ->where('period_start', $periodStart)
+                ->where('period_end', $periodEnd);
+
+            if ($agentId === null) {
+                $query->whereNull('agent_id');
+            } else {
+                $query->where('agent_id', $agentId);
+            }
+
+            $existing = $query->lockForUpdate()->first();
+            $now = now();
+
+            if ($existing === null) {
+                DB::table('commission_reports')->insert([
+                    'agent_id' => $agentId,
+                    'period_start' => $periodStart,
+                    'period_end' => $periodEnd,
+                    'completed_sales_count' => max(0, $completedSalesCountDelta),
+                    'total_commission' => max(0, $totalCommissionDelta),
+                    'currency' => $currency,
+                    'projected_at' => $now,
+                ]);
+
+                return;
+            }
+
+            $updateQuery = DB::table('commission_reports')
+                ->where('period_start', $periodStart)
+                ->where('period_end', $periodEnd);
+
+            if ($agentId === null) {
+                $updateQuery->whereNull('agent_id');
+            } else {
+                $updateQuery->where('agent_id', $agentId);
+            }
+
+            $updateQuery->update([
+                'completed_sales_count' => (int) $existing->completed_sales_count + $completedSalesCountDelta,
+                'total_commission' => (int) $existing->total_commission + $totalCommissionDelta,
+                'currency' => $currency,
+                'projected_at' => $now,
+            ]);
+        });
     }
 
     private function rowString(\stdClass $row, string $key): string
     {
-        $v = $row->{$key} ?? null;
-        return is_scalar($v) ? (string) $v : '';
+        $value = $row->{$key} ?? null;
+
+        return is_scalar($value) ? (string) $value : '';
     }
 
     private function rowStringOrNull(\stdClass $row, string $key): ?string
     {
-        $v = $row->{$key} ?? null;
-        return is_scalar($v) ? (string) $v : null;
+        $value = $row->{$key} ?? null;
+
+        return is_scalar($value) ? (string) $value : null;
     }
 
     private function rowInt(\stdClass $row, string $key): int
     {
-        $v = $row->{$key} ?? null;
-        return is_numeric($v) ? (int) $v : 0;
+        $value = $row->{$key} ?? null;
+
+        return is_numeric($value) ? (int) $value : 0;
     }
 
     private function fmt(mixed $value): string
@@ -197,15 +356,18 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
         if ($value instanceof \DateTimeInterface) {
             return $value->format('Y-m-d H:i:s');
         }
+
         if (is_string($value) && $value !== '') {
             return $value;
         }
+
         return '';
     }
 
     private function fmtNullable(mixed $value): ?string
     {
-        $s = $this->fmt($value);
-        return $s === '' ? null : $s;
+        $value = $this->fmt($value);
+
+        return $value === '' ? null : $value;
     }
 }

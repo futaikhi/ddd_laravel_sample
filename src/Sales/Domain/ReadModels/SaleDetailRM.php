@@ -5,16 +5,10 @@ declare(strict_types=1);
 namespace Src\Sales\Domain\ReadModels;
 
 /**
- * Read model for a single sale detail (GET /sales/{id}).
- *
- * This is a flat DTO — no domain behavior, no invariants. It carries only
- * the shape the API consumer expects. Cross-domain data (customer name,
- * product name) MAY be joined here on the read side without violating
- * write-side aggregate boundaries.
+ * @param list<SaleLineItemRM> $lineItems
  */
 final readonly class SaleDetailRM
 {
-    /** @param list<SaleLineItemRM> $lineItems */
     public function __construct(
         public string $id,
         public string $customerId,
@@ -22,16 +16,16 @@ final readonly class SaleDetailRM
         public int $totalAmount,
         public string $currency,
         public array $lineItems,
-        public ?string $paymentMethod,
-        public ?string $transactionId,
-        public ?int $commissionAmount,
-        public ?float $commissionRate,
-        public ?string $commissionCurrency,
-        public string $createdAt,
-        public ?string $confirmedAt,
-        public ?string $completedAt,
-        public ?string $cancelledAt,
-        public ?string $cancellationReason,
+        public ?string $paymentMethod = null,
+        public ?string $transactionId = null,
+        public ?int $commissionAmount = null,
+        public ?float $commissionRate = null,
+        public ?string $commissionCurrency = null,
+        public ?string $createdAt = null,
+        public ?string $confirmedAt = null,
+        public ?string $completedAt = null,
+        public ?string $cancelledAt = null,
+        public ?string $cancellationReason = null,
     ) {
     }
 }

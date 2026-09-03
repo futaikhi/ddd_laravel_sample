@@ -15,9 +15,8 @@ use Src\Shared\Framework\Application\Queries\PaginatedCollection;
 /**
  * Read-side port for Sales.
  *
- * Deliberately separate from SaleRepositoryInterface (write side).
- * Read methods return flat DTOs, never aggregates, and MAY perform
- * cross-table joins because they do not enforce invariants.
+ * This port is deliberately separate from SaleRepositoryInterface (write side).
+ * Query methods return flat read-model DTOs, not domain aggregates.
  */
 interface SaleReadModelRepositoryInterface
 {
@@ -44,4 +43,51 @@ interface SaleReadModelRepositoryInterface
      * @return list<CommissionSummaryRM>
      */
     public function commissionSummary(string $dateFrom, string $dateTo): array;
+
+    public function upsertSaleListItem(
+        string $saleId,
+        string $customerId,
+        ?string $customerName,
+        string $status,
+        int $totalAmount,
+        string $currency,
+        ?string $createdAt,
+    ): void;
+
+    public function updateSaleListItemStatus(
+        string $saleId,
+        string $status,
+        ?string $confirmedAt = null,
+        ?string $completedAt = null,
+        ?string $cancelledAt = null,
+        ?string $cancellationReason = null,
+    ): void;
+
+    /**
+     * Increment the daily sales report bucket for the given date.
+     *
+     * Adds `salesCountDelta` to sales_count and `revenueDelta` to revenue_total,
+     * creating the row if it does not yet exist.
+     */
+    public function incrementSalesReport(
+        string $reportDate,
+        int $salesCountDelta,
+        int $revenueDelta,
+        string $currency,
+    ): void;
+
+    /**
+     * Increment the commission summary bucket for the given agent/period.
+     *
+     * Adds `completedSalesCountDelta` and `totalCommissionDelta` to the row
+     * identified by (agentId, periodStart, periodEnd), creating it if needed.
+     */
+    public function incrementCommissionSummary(
+        ?string $agentId,
+        string $periodStart,
+        string $periodEnd,
+        int $completedSalesCountDelta,
+        int $totalCommissionDelta,
+        string $currency,
+    ): void;
 }
