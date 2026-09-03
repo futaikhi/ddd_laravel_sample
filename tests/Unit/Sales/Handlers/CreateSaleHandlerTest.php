@@ -6,14 +6,11 @@ namespace Tests\Unit\Sales\Handlers;
 
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
-use Src\Sales\Application\Commands\Complete\CompleteSaleCommand;
-use Src\Sales\Application\Commands\Complete\CompleteSaleHandler;
+use Src\Sales\Application\Commands\Create\CreateSaleCommand;
+use Src\Sales\Application\Commands\Create\CreateSaleHandler;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Enums\OrderStatus;
-use Src\Sales\Domain\Enums\PaymentMethod;
-use Src\Sales\Domain\Ports\CommissionCalculatorInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
-use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
@@ -23,7 +20,7 @@ use Src\Sales\Domain\ValueObjects\SalesFilter;
 use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 /**
- * AC-003 command-side contract for {@see CompleteSaleHandler}.
+ * AC-003 command-side contract for {@see CreateSaleHandler}.
  *
  * Proves the handler:
  *  - Returns void (no read data leaks back through the command bus).
@@ -31,32 +28,41 @@ use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
  *  - Publishes the domain events collected on the aggregate via the event bus.
  *  - Never depends on read-model repositories (structural check).
  */
-final class CompleteSaleHandlerTest extends TestCase
+final class CreateSaleHandlerTest extends TestCase
 {
     public function test_it_returns_void_and_does_not_leak_read_data(): void
     {
-        $sale = $this->makeConfirmedSale();
-        $repo = $this->makeRepo($sale);
-        $commissionCalculator = $this->makeCommissionCalculator();
+        $repo = $this->makeRepo();
         $eventBus = $this->createMock(EventBusInterface::class);
         $eventBus->expects($this->once())->method('publishEvents');
 
-        $handler = new CompleteSaleHandler($repo, $commissionCalculator, $eventBus);
+        $handler = new CreateSaleHandler($repo, $eventBus);
 
-        $result = $handler(new CompleteSaleCommand(id: $sale->getId()));
+        $command = new CreateSaleCommand(
+            id: SaleId::random(),
+            customerId: CustomerId::random(),
+            lineItems: [
+                new LineItem(
+                    productId: ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'),
+                    quantity: 2,
+                    unitPrice: Money::fromCents(30000, 'IDR'),
+                ),
+            ],
+        );
+
+        $result = $handler($command);
 
         $this->assertNull($result, 'Command handler must return void; it must not leak read data');
 
-        $returnType = (new ReflectionMethod(CompleteSaleHandler::class, '__invoke'))->getReturnType();
+        // Structural: the handler contract itself must be void.
+        $returnType = (new ReflectionMethod(CreateSaleHandler::class, '__invoke'))->getReturnType();
         $this->assertNotNull($returnType);
         $this->assertSame('void', (string) $returnType);
     }
 
     public function test_it_persists_the_aggregate_and_publishes_its_events(): void
     {
-        $sale = $this->makeConfirmedSale();
-        $repo = $this->makeRepo($sale);
-        $commissionCalculator = $this->makeCommissionCalculator();
+        $repo = $this->makeRepo();
         $eventBus = $this->createMock(EventBusInterface::class);
 
         $capturedEvents = null;
@@ -68,12 +74,24 @@ final class CompleteSaleHandlerTest extends TestCase
                 return is_array($events) && count($events) >= 1;
             }));
 
-        $handler = new CompleteSaleHandler($repo, $commissionCalculator, $eventBus);
-        $handler(new CompleteSaleCommand(id: $sale->getId()));
+        $handler = new CreateSaleHandler($repo, $eventBus);
 
-        $this->assertTrue($repo->stored, 'Handler must persist the sale via the write repository');
-        $this->assertSame(OrderStatus::COMPLETED, $sale->getStatus());
-        $this->assertNotNull($sale->getCommission());
+        $saleId = SaleId::random();
+        $handler(new CreateSaleCommand(
+            id: $saleId,
+            customerId: CustomerId::random(),
+            lineItems: [
+                new LineItem(
+                    productId: ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'),
+                    quantity: 1,
+                    unitPrice: Money::fromCents(50000, 'IDR'),
+                ),
+            ],
+        ));
+
+        $this->assertNotNull($repo->stored, 'Handler must persist the sale via the write repository');
+        $this->assertSame($saleId->getValue(), $repo->stored->getId()->getValue());
+        $this->assertSame(OrderStatus::PENDING, $repo->stored->getStatus());
 
         $this->assertIsArray($capturedEvents);
         $this->assertNotEmpty($capturedEvents, 'Handler must publish the aggregate\'s domain events');
@@ -81,7 +99,7 @@ final class CompleteSaleHandlerTest extends TestCase
 
     public function test_it_only_depends_on_write_side_ports(): void
     {
-        $constructor = (new \ReflectionClass(CompleteSaleHandler::class))->getConstructor();
+        $constructor = (new \ReflectionClass(CreateSaleHandler::class))->getConstructor();
         $this->assertNotNull($constructor);
 
         $paramTypes = [];
@@ -93,9 +111,9 @@ final class CompleteSaleHandlerTest extends TestCase
         }
 
         $this->assertContains(SaleRepositoryInterface::class, $paramTypes);
-        $this->assertContains(CommissionCalculatorInterface::class, $paramTypes);
         $this->assertContains(EventBusInterface::class, $paramTypes);
 
+        // CQRS rule: command handlers must not depend on the read-model repository.
         foreach ($paramTypes as $paramType) {
             $this->assertStringNotContainsString(
                 'ReadModelRepository',
@@ -105,61 +123,34 @@ final class CompleteSaleHandlerTest extends TestCase
         }
     }
 
-    private function makeConfirmedSale(): Sale
+    private function makeRepo(): object
     {
-        $sale = Sale::create(
-            SaleId::random(),
-            CustomerId::random(),
-            [new LineItem(
-                productId: ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'),
-                quantity: 2,
-                unitPrice: Money::fromCents(50000, 'IDR'),
-            )],
-        );
-        $sale->confirm(PaymentMethod::CREDIT_CARD, 'TXN-TEST-001');
-        // Drain events collected during create/confirm so the assertions on
-        // publishEvents() only observe the events produced by complete().
-        $sale->releaseEvents();
-
-        return $sale;
-    }
-
-    private function makeCommissionCalculator(): CommissionCalculatorInterface
-    {
-        return new class implements CommissionCalculatorInterface {
-            public function calculate(Sale $sale): Commission
-            {
-                return Commission::fromRate($sale->getTotalAmount(), 3.0, 'test');
-            }
-        };
-    }
-
-    private function makeRepo(Sale $sale): object
-    {
-        return new class($sale) implements SaleRepositoryInterface {
-            public bool $stored = false;
-
-            public function __construct(private Sale $sale) {}
+        return new class implements SaleRepositoryInterface {
+            public ?Sale $stored = null;
 
             public function store(Sale $sale): void
             {
-                $this->stored = true;
+                $this->stored = $sale;
             }
 
             public function findById(SaleId $id): ?Sale
             {
-                return $this->sale;
+                return $this->stored;
             }
 
             public function getById(SaleId $id): Sale
             {
-                return $this->sale;
+                if ($this->stored === null) {
+                    throw new \RuntimeException('sale not found');
+                }
+
+                return $this->stored;
             }
 
             /** @return list<Sale> */
             public function list(SalesFilter $filter): array
             {
-                return [$this->sale];
+                return $this->stored === null ? [] : [$this->stored];
             }
         };
     }
