@@ -18,9 +18,15 @@ use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
 use Src\Sales\Domain\ValueObjects\SalesFilter;
+use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 final class SaleRepository implements SaleRepositoryInterface
 {
+    public function __construct(
+        private EventBusInterface $eventBus,
+    ) {
+    }
+
     public function store(Sale $sale): void
     {
         $commission = $sale->getCommission();
@@ -55,6 +61,8 @@ final class SaleRepository implements SaleRepositoryInterface
                 'currency' => $lineItem->unitPrice->currency,
             ]);
         }
+
+        $this->eventBus->publishEvents($sale->releaseEvents());
     }
 
     public function findById(SaleId $id): ?Sale

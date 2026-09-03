@@ -17,14 +17,16 @@ final readonly class ProjectSaleListItemOnSaleCreatedHandler
 
     public function handle(SaleCreatedEvent $event): void
     {
+        $currency = $event->items[0]['currency'] ?? 'IDR';
+
         $this->readModels->upsertSaleListItem(
             saleId: $event->saleId,
             customerId: $event->customerId,
             customerName: null,
             status: OrderStatus::PENDING->value,
             totalAmount: $event->totalAmount,
-            currency: 'IDR',
-            createdAt: null,
+            currency: $currency,
+            createdAt: $event->createdAt,
         );
     }
 }

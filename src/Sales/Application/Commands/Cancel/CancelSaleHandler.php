@@ -9,14 +9,12 @@ use Src\Sales\Domain\Exceptions\SaleCannotBeCancelledException;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandHandlerInterface;
-use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 final readonly class CancelSaleHandler implements CommandHandlerInterface
 {
     public function __construct(
         private SaleRepositoryInterface $repository,
         private PaymentGatewayInterface $paymentGateway,
-        private EventBusInterface $eventBus,
     ) {
     }
 
@@ -37,6 +35,5 @@ final readonly class CancelSaleHandler implements CommandHandlerInterface
         $sale->cancel($command->reason);
 
         $this->repository->store($sale);
-        $this->eventBus->publishEvents($sale->releaseEvents());
     }
 }

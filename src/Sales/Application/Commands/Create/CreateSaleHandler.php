@@ -7,13 +7,11 @@ namespace Src\Sales\Application\Commands\Create;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandHandlerInterface;
-use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 final readonly class CreateSaleHandler implements CommandHandlerInterface
 {
     public function __construct(
         private SaleRepositoryInterface $repository,
-        private EventBusInterface $eventBus,
     ) {
     }
 
@@ -26,6 +24,5 @@ final readonly class CreateSaleHandler implements CommandHandlerInterface
         );
 
         $this->repository->store($sale);
-        $this->eventBus->publishEvents($sale->releaseEvents());
     }
 }

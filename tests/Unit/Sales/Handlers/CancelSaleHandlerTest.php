@@ -11,6 +11,7 @@ use Src\Sales\Application\Commands\Cancel\CancelSaleHandler;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Enums\OrderStatus;
 use Src\Sales\Domain\Enums\PaymentMethod;
+use Src\Sales\Domain\Events\SaleCancelledEvent;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\CustomerId;
@@ -21,16 +22,16 @@ use Src\Sales\Domain\ValueObjects\PaymentResult;
 use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
 use Src\Sales\Domain\ValueObjects\SalesFilter;
-use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 /**
- * AC-003 command-side contract for {@see CancelSaleHandler}.
+ * AC-004 command-side contract {@see CancelSaleHandler}.
  *
- * Proves the handler:
- *  - Returns void (no read data leaks back through the command bus).
- *  - Persists the aggregate via SaleRepositoryInterface (write side only).
- *  - Publishes the domain events collected on the aggregate via the event bus.
- *  - Never depends on read-model repositories (structural check).
+ * Proves handler:
+ * - returns void (no read data leaks back through the command bus),
+ * - persists aggregate through SaleRepositoryInterface (write side only),
+ * - leaves SaleCancelledEvent recorded so the repository persistence boundary can publish it,
+ * - refunds confirmed sales before cancelling,
+ * - does not depend on read-model repositories or the event bus directly.
  */
 final class CancelSaleHandlerTest extends TestCase
 {
@@ -39,58 +40,51 @@ final class CancelSaleHandlerTest extends TestCase
         $sale = $this->makePendingSale();
         $repo = $this->makeRepo($sale);
         $paymentGateway = $this->createMock(PaymentGatewayInterface::class);
-        $eventBus = $this->createMock(EventBusInterface::class);
-        $eventBus->expects($this->once())->method('publishEvents');
 
-        $handler = new CancelSaleHandler($repo, $paymentGateway, $eventBus);
+        $handler = new CancelSaleHandler($repo, $paymentGateway);
 
         $result = $handler(new CancelSaleCommand(
             id: $sale->getId(),
             reason: 'customer changed mind',
         ));
 
-        $this->assertNull($result, 'Command handler must return void; it must not leak read data');
+        $this->assertNull($result, 'Command handler must return void; must not leak read data');
 
         $returnType = (new ReflectionMethod(CancelSaleHandler::class, '__invoke'))->getReturnType();
         $this->assertNotNull($returnType);
         $this->assertSame('void', (string) $returnType);
     }
 
-    public function test_it_persists_the_aggregate_and_publishes_its_events_for_pending_sale(): void
+    public function test_it_persists_pending_sale_with_cancelled_event_for_repository_publishing(): void
     {
         $sale = $this->makePendingSale();
         $repo = $this->makeRepo($sale);
-        // Pending sales never went through payment, so refund must NEVER be called.
+
         $paymentGateway = $this->createMock(PaymentGatewayInterface::class);
         $paymentGateway->expects($this->never())->method('refund');
         $paymentGateway->expects($this->never())->method('process');
 
-        $eventBus = $this->createMock(EventBusInterface::class);
-
-        $capturedEvents = null;
-        $eventBus->expects($this->once())
-            ->method('publishEvents')
-            ->with($this->callback(static function ($events) use (&$capturedEvents): bool {
-                $capturedEvents = $events;
-
-                return is_array($events) && count($events) >= 1;
-            }));
-
-        $handler = new CancelSaleHandler($repo, $paymentGateway, $eventBus);
+        $handler = new CancelSaleHandler($repo, $paymentGateway);
         $handler(new CancelSaleCommand(
             id: $sale->getId(),
             reason: 'customer changed mind',
         ));
 
-        $this->assertTrue($repo->stored, 'Handler must persist the sale via the write repository');
+        $this->assertTrue($repo->stored, 'Handler must persist sale through the write repository');
         $this->assertSame(OrderStatus::CANCELLED, $sale->getStatus());
         $this->assertSame('customer changed mind', $sale->getCancellationReason());
+        $this->assertNotNull($sale->getCancelledAt());
 
-        $this->assertIsArray($capturedEvents);
-        $this->assertNotEmpty($capturedEvents, 'Handler must publish the aggregate\'s domain events');
+        $events = $sale->pullDomainEvents();
+
+        $this->assertCount(1, $events);
+        $this->assertInstanceOf(SaleCancelledEvent::class, $events[0]);
+        $this->assertSame($sale->getId()->getValue(), $events[0]->saleId);
+        $this->assertSame('customer changed mind', $events[0]->reason);
+        $this->assertNotEmpty($events[0]->cancelledAt);
     }
 
-    public function test_it_refunds_persists_and_publishes_events_for_confirmed_sale(): void
+    public function test_it_refunds_confirmed_sale_and_records_cancelled_event_for_repository_publishing(): void
     {
         $sale = $this->makeConfirmedSale();
         $repo = $this->makeRepo($sale);
@@ -100,10 +94,7 @@ final class CancelSaleHandlerTest extends TestCase
             ->method('refund')
             ->with('TXN-TEST-001');
 
-        $eventBus = $this->createMock(EventBusInterface::class);
-        $eventBus->expects($this->once())->method('publishEvents');
-
-        $handler = new CancelSaleHandler($repo, $paymentGateway, $eventBus);
+        $handler = new CancelSaleHandler($repo, $paymentGateway);
         $handler(new CancelSaleCommand(
             id: $sale->getId(),
             reason: 'fraud detected',
@@ -111,6 +102,15 @@ final class CancelSaleHandlerTest extends TestCase
 
         $this->assertTrue($repo->stored);
         $this->assertSame(OrderStatus::CANCELLED, $sale->getStatus());
+        $this->assertSame('fraud detected', $sale->getCancellationReason());
+
+        $events = $sale->pullDomainEvents();
+
+        $this->assertCount(1, $events);
+        $this->assertInstanceOf(SaleCancelledEvent::class, $events[0]);
+        $this->assertSame($sale->getId()->getValue(), $events[0]->saleId);
+        $this->assertSame('fraud detected', $events[0]->reason);
+        $this->assertNotEmpty($events[0]->cancelledAt);
     }
 
     public function test_it_only_depends_on_write_side_ports(): void
@@ -128,13 +128,17 @@ final class CancelSaleHandlerTest extends TestCase
 
         $this->assertContains(SaleRepositoryInterface::class, $paramTypes);
         $this->assertContains(PaymentGatewayInterface::class, $paramTypes);
-        $this->assertContains(EventBusInterface::class, $paramTypes);
 
         foreach ($paramTypes as $paramType) {
             $this->assertStringNotContainsString(
                 'ReadModelRepository',
                 $paramType,
                 'Command handler must not depend on read-model repositories'
+            );
+            $this->assertStringNotContainsString(
+                'EventBus',
+                $paramType,
+                'Repository is responsible for publishing recorded domain events'
             );
         }
     }
@@ -147,10 +151,11 @@ final class CancelSaleHandlerTest extends TestCase
             [new LineItem(
                 productId: ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'),
                 quantity: 2,
-                unitPrice: Money::fromCents(50000, 'IDR'),
+                unitPrice: Money::fromCents(50000, 'IDR')
             )],
         );
-        // Drain the SaleCreated event so publishEvents() assertions only see cancel events.
+
+        // Drain SaleCreated event so assertions only observe cancel events.
         $sale->releaseEvents();
 
         return $sale;
@@ -164,9 +169,10 @@ final class CancelSaleHandlerTest extends TestCase
             [new LineItem(
                 productId: ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'),
                 quantity: 2,
-                unitPrice: Money::fromCents(50000, 'IDR'),
+                unitPrice: Money::fromCents(50000, 'IDR')
             )],
         );
+
         $sale->confirm(PaymentMethod::CREDIT_CARD, 'TXN-TEST-001');
         $sale->releaseEvents();
 
@@ -178,7 +184,9 @@ final class CancelSaleHandlerTest extends TestCase
         return new class($sale) implements SaleRepositoryInterface {
             public bool $stored = false;
 
-            public function __construct(private Sale $sale) {}
+            public function __construct(private Sale $sale)
+            {
+            }
 
             public function store(Sale $sale): void
             {

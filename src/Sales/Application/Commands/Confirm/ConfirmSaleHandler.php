@@ -11,14 +11,12 @@ use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\PaymentRequest;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandHandlerInterface;
-use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 final readonly class ConfirmSaleHandler implements CommandHandlerInterface
 {
     public function __construct(
         private SaleRepositoryInterface $repository,
         private PaymentGatewayInterface $paymentGateway,
-        private EventBusInterface $eventBus,
     ) {
     }
 
@@ -47,6 +45,5 @@ final readonly class ConfirmSaleHandler implements CommandHandlerInterface
         );
 
         $this->repository->store($sale);
-        $this->eventBus->publishEvents($sale->releaseEvents());
     }
 }

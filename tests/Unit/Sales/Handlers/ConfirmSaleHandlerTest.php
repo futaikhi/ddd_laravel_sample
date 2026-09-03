@@ -10,6 +10,7 @@ use Src\Sales\Application\Commands\Confirm\ConfirmSaleHandler;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Enums\OrderStatus;
 use Src\Sales\Domain\Enums\PaymentMethod;
+use Src\Sales\Domain\Events\SaleConfirmedEvent;
 use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
 use Src\Sales\Domain\Ports\PaymentFailedException;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
@@ -23,7 +24,6 @@ use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
 use Src\Sales\Domain\ValueObjects\SalesFilter;
 use Src\Sales\Infrastructure\Payment\MockPaymentGatewayAdapter;
-use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
 final class ConfirmSaleHandlerTest extends TestCase
 {
@@ -32,11 +32,8 @@ final class ConfirmSaleHandlerTest extends TestCase
         $sale = $this->makeSale();
         $repo = $this->makeRepo($sale);
         $paymentPort = new MockPaymentGatewayAdapter();
-        $eventBus = $this->createMock(EventBusInterface::class);
 
-        $eventBus->expects($this->once())->method('publishEvents');
-
-        $handler = new ConfirmSaleHandler($repo, $paymentPort, $eventBus);
+        $handler = new ConfirmSaleHandler($repo, $paymentPort);
         $handler(new ConfirmSaleCommand(
             id: $sale->getId(),
             paymentMethod: PaymentMethod::CREDIT_CARD,
@@ -49,6 +46,26 @@ final class ConfirmSaleHandlerTest extends TestCase
         $this->assertTrue($repo->stored);
     }
 
+    public function test_it_keeps_confirmed_event_recorded_for_repository_publishing(): void
+    {
+        $sale = $this->makeSale();
+        $repo = $this->makeRepo($sale);
+        $paymentPort = new MockPaymentGatewayAdapter();
+
+        $handler = new ConfirmSaleHandler($repo, $paymentPort);
+        $handler(new ConfirmSaleCommand(
+            id: $sale->getId(),
+            paymentMethod: PaymentMethod::CREDIT_CARD,
+        ));
+
+        $events = $sale->pullDomainEvents();
+
+        $this->assertNotEmpty($events);
+        $this->assertContainsOnlyInstancesOf(SaleConfirmedEvent::class, $events);
+        $this->assertSame($sale->getId()->getValue(), $events[0]->saleId);
+        $this->assertNotEmpty($events[0]->confirmedAt);
+    }
+
     public function test_it_throws_and_keeps_sale_pending_when_payment_fails(): void
     {
         $sale = $this->makeSale();
@@ -56,10 +73,8 @@ final class ConfirmSaleHandlerTest extends TestCase
         $paymentPort = new MockPaymentGatewayAdapter();
         $paymentPort->setShouldSucceed(false);
         $paymentPort->setFailureMessage('Insufficient funds');
-        $eventBus = $this->createMock(EventBusInterface::class);
-        $eventBus->expects($this->never())->method('publishEvents');
 
-        $handler = new ConfirmSaleHandler($repo, $paymentPort, $eventBus);
+        $handler = new ConfirmSaleHandler($repo, $paymentPort);
 
         try {
             $handler(new ConfirmSaleCommand(
@@ -81,7 +96,6 @@ final class ConfirmSaleHandlerTest extends TestCase
     {
         $sale = $this->makeSale();
         $repo = $this->makeRepo($sale);
-        $eventBus = $this->createMock(EventBusInterface::class);
 
         $paymentPort = new class implements PaymentGatewayInterface {
             public function process(PaymentRequest $request): PaymentResult
@@ -94,7 +108,7 @@ final class ConfirmSaleHandlerTest extends TestCase
             }
         };
 
-        $handler = new ConfirmSaleHandler($repo, $paymentPort, $eventBus);
+        $handler = new ConfirmSaleHandler($repo, $paymentPort);
         $handler(new ConfirmSaleCommand(
             id: $sale->getId(),
             paymentMethod: PaymentMethod::BANK_TRANSFER,
@@ -116,10 +130,7 @@ final class ConfirmSaleHandlerTest extends TestCase
         $paymentGateway->expects($this->never())->method('process');
         $paymentGateway->expects($this->never())->method('refund');
 
-        $eventBus = $this->createMock(EventBusInterface::class);
-        $eventBus->expects($this->never())->method('publishEvents');
-
-        $handler = new ConfirmSaleHandler($repo, $paymentGateway, $eventBus);
+        $handler = new ConfirmSaleHandler($repo, $paymentGateway);
 
         $this->expectException(SaleCannotBeConfirmedException::class);
 
@@ -131,16 +142,20 @@ final class ConfirmSaleHandlerTest extends TestCase
 
     private function makeSale(): Sale
     {
-        return Sale::create(
+        $sale = Sale::create(
             SaleId::random(),
             CustomerId::random(),
             [new LineItem(ProductId::fromString('01H8M6KJ5NQ8XX4P0N2VYJ4K5D'), 2, Money::fromCents(30000, 'IDR'))],
         );
+
+        $sale->releaseEvents();
+
+        return $sale;
     }
 
     private function makeRepo(Sale $sale, bool $expectStore = true): SaleRepositoryInterface
     {
-        return new class ($sale, $expectStore) implements SaleRepositoryInterface {
+        return new class($sale, $expectStore) implements SaleRepositoryInterface {
             public bool $stored = false;
 
             public function __construct(private Sale $sale, private bool $expectStore)
@@ -166,9 +181,7 @@ final class ConfirmSaleHandlerTest extends TestCase
                 return $this->sale;
             }
 
-            /**
-             * @return list<Sale>
-             */
+            /** @return list<Sale> */
             public function list(SalesFilter $filter): array
             {
                 return [$this->sale];
