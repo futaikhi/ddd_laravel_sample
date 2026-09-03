@@ -6,6 +6,7 @@ namespace Src\Sales\Domain\Repositories;
 
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\ValueObjects\SaleId;
+use Src\Sales\Domain\ValueObjects\SalesFilter;
 
 interface SaleRepositoryInterface
 {
@@ -14,4 +15,9 @@ interface SaleRepositoryInterface
     public function findById(SaleId $id): ?Sale;
 
     public function getById(SaleId $id): Sale;
+
+    /**
+     * @return list<Sale>
+     */
+    public function list(SalesFilter $filter): array;
 }

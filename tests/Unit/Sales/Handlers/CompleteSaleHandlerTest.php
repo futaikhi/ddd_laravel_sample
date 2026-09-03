@@ -18,6 +18,7 @@ use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
+use Src\Sales\Domain\ValueObjects\SalesFilter;
 use Src\Sales\Infrastructure\Commission\MockCommissionService;
 use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
@@ -102,6 +103,14 @@ final class CompleteSaleHandlerTest extends TestCase
             public function getById(SaleId $id): Sale
             {
                 return $this->sale;
+            }
+
+            /**
+             * @return list<Sale>
+             */
+            public function list(SalesFilter $filter): array
+            {
+                return [$this->sale];
             }
         };
     }

@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Src\Sales\Infrastructure\Persistence;
 
+use DateTimeImmutable;
+use DateTimeInterface;
 use Src\Sales\Domain\Entities\Sale;
+use Src\Sales\Domain\Enums\OrderStatus;
+use Src\Sales\Domain\Enums\PaymentMethod;
 use Src\Sales\Domain\Exceptions\SaleNotFoundException;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\Commission;
@@ -13,8 +17,7 @@ use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
-use Src\Sales\Domain\Enums\OrderStatus;
-use Src\Sales\Domain\Enums\PaymentMethod;
+use Src\Sales\Domain\ValueObjects\SalesFilter;
 
 final class SaleRepository implements SaleRepositoryInterface
 {
@@ -25,20 +28,20 @@ final class SaleRepository implements SaleRepositoryInterface
         SaleModel::updateOrCreate(
             ['id' => $sale->getId()->getValue()],
             [
-                'customer_id'         => $sale->getCustomerId()->getValue(),
-                'status'              => $sale->getStatus()->value,
-                'total_amount'        => $sale->getTotalAmount()->getValue(),
-                'created_at'          => $sale->getCreatedAt()->format('Y-m-d H:i:s'),
-                'confirmed_at'        => $sale->getConfirmedAt()?->format('Y-m-d H:i:s'),
-                'cancelled_at'        => $sale->getCancelledAt()?->format('Y-m-d H:i:s'),
+                'customer_id' => $sale->getCustomerId()->getValue(),
+                'status' => $sale->getStatus()->value,
+                'total_amount' => $sale->getTotalAmount()->getValue(),
+                'created_at' => $sale->getCreatedAt()->format('Y-m-d H:i:s'),
+                'confirmed_at' => $sale->getConfirmedAt()?->format('Y-m-d H:i:s'),
+                'cancelled_at' => $sale->getCancelledAt()?->format('Y-m-d H:i:s'),
                 'cancellation_reason' => $sale->getCancellationReason(),
-                'completed_at'        => $sale->getCompletedAt()?->format('Y-m-d H:i:s'),
-                'payment_method'      => $sale->getPaymentMethod()?->value,
-                'transaction_id'      => $sale->getTransactionId(),
-                'commission_amount'   => $commission?->getAmount()->amount,
-                'commission_rate'     => $commission?->getRate(),
+                'completed_at' => $sale->getCompletedAt()?->format('Y-m-d H:i:s'),
+                'payment_method' => $sale->getPaymentMethod()?->value,
+                'transaction_id' => $sale->getTransactionId(),
+                'commission_amount' => $commission?->getAmount()->amount,
+                'commission_rate' => $commission?->getRate(),
                 'commission_currency' => $commission?->getAmount()->currency,
-            ]
+            ],
         );
 
         SaleLineItemModel::where('sale_id', $sale->getId()->getValue())->delete();
@@ -46,7 +49,7 @@ final class SaleRepository implements SaleRepositoryInterface
         foreach ($sale->getLineItems() as $lineItem) {
             SaleLineItemModel::create([
                 'sale_id' => $sale->getId()->getValue(),
-                'product_id' => $lineItem->productId,
+                'product_id' => $lineItem->productId->getValue(),
                 'quantity' => $lineItem->quantity,
                 'unit_price' => $lineItem->unitPrice->getValue(),
                 'currency' => $lineItem->unitPrice->currency,
@@ -62,8 +65,67 @@ final class SaleRepository implements SaleRepositoryInterface
             return null;
         }
 
+        return $this->mapModelToSale($model);
+    }
+
+    public function getById(SaleId $id): Sale
+    {
+        $sale = $this->findById($id);
+
+        if ($sale === null) {
+            throw SaleNotFoundException::withId($id);
+        }
+
+        return $sale;
+    }
+
+    /**
+     * @return list<Sale>
+     */
+    public function list(SalesFilter $filter): array
+    {
+        $query = SaleModel::query()->with('lineItems');
+
+        if ($filter->customerId !== null) {
+            $query->where('customer_id', $filter->customerId->getValue());
+        }
+
+        if ($filter->status !== null) {
+            $query->where('status', $filter->status->value);
+        }
+
+        if ($filter->createdFrom !== null) {
+            $query->where('created_at', '>=', $filter->createdFrom->format('Y-m-d H:i:s'));
+        }
+
+        if ($filter->createdTo !== null) {
+            $query->where('created_at', '<=', $filter->createdTo->format('Y-m-d H:i:s'));
+        }
+
+        if ($filter->offset !== null) {
+            $query->offset($filter->offset);
+        }
+
+        if ($filter->limit !== null) {
+            $query->limit($filter->limit);
+        }
+
+        /** @var list<Sale> $sales */
+        $sales = [];
+
+        /** @var SaleModel $model */
+        foreach ($query->orderByDesc('created_at')->get() as $model) {
+            $sales[] = $this->mapModelToSale($model);
+        }
+
+        return $sales;
+    }
+
+    private function mapModelToSale(SaleModel $model): Sale
+    {
         /** @var list<LineItem> $lineItems */
         $lineItems = [];
+
         /** @var SaleLineItemModel $item */
         foreach ($model->lineItems as $item) {
             $lineItems[] = new LineItem(
@@ -90,11 +152,11 @@ final class SaleRepository implements SaleRepositoryInterface
             lineItems: $lineItems,
             status: OrderStatus::from((string) $model->status),
             totalAmount: new Money((int) $model->total_amount, 'IDR'),
-            createdAt: $this->toDateTimeImmutable($model->created_at) ?? new \DateTimeImmutable(),
+            createdAt: $this->toDateTimeImmutable($model->created_at) ?? new DateTimeImmutable(),
             confirmedAt: $this->toDateTimeImmutable($model->confirmed_at),
+            completedAt: $this->toDateTimeImmutable($model->completed_at),
             cancelledAt: $this->toDateTimeImmutable($model->cancelled_at),
             cancellationReason: $model->cancellation_reason !== null ? (string) $model->cancellation_reason : null,
-            completedAt: $this->toDateTimeImmutable($model->completed_at),
             paymentMethod: $model->payment_method !== null
                 ? PaymentMethod::from((string) $model->payment_method)
                 : null,
@@ -103,31 +165,20 @@ final class SaleRepository implements SaleRepositoryInterface
         );
     }
 
-    private function toDateTimeImmutable(mixed $value): ?\DateTimeImmutable
+    private function toDateTimeImmutable(mixed $value): ?DateTimeImmutable
     {
         if ($value === null || $value === '') {
             return null;
         }
 
-        if ($value instanceof \DateTimeInterface) {
-            return \DateTimeImmutable::createFromInterface($value);
+        if ($value instanceof DateTimeInterface) {
+            return DateTimeImmutable::createFromInterface($value);
         }
 
         if (is_string($value)) {
-            return new \DateTimeImmutable($value);
+            return new DateTimeImmutable($value);
         }
 
         return null;
-    }
-
-    public function getById(SaleId $id): Sale
-    {
-        $sale = $this->findById($id);
-
-        if ($sale === null) {
-            throw SaleNotFoundException::withId($id);
-        }
-
-        return $sale;
     }
 }

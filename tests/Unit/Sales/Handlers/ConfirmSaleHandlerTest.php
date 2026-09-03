@@ -21,6 +21,7 @@ use Src\Sales\Domain\ValueObjects\PaymentRequest;
 use Src\Sales\Domain\ValueObjects\PaymentResult;
 use Src\Sales\Domain\ValueObjects\ProductId;
 use Src\Sales\Domain\ValueObjects\SaleId;
+use Src\Sales\Domain\ValueObjects\SalesFilter;
 use Src\Sales\Infrastructure\Payment\MockPaymentGatewayAdapter;
 use Src\Shared\Framework\Infrastructure\Bus\EventBus\EventBusInterface;
 
@@ -163,6 +164,14 @@ final class ConfirmSaleHandlerTest extends TestCase
             public function getById(SaleId $id): Sale
             {
                 return $this->sale;
+            }
+
+            /**
+             * @return list<Sale>
+             */
+            public function list(SalesFilter $filter): array
+            {
+                return [$this->sale];
             }
         };
     }
