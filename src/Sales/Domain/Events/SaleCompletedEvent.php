@@ -16,6 +16,7 @@ final class SaleCompletedEvent extends DomainEvent
         public readonly int $commissionAmount,
         public readonly float $commissionRate,
         public readonly string $commissionCurrency,
+        public readonly ?string $agentId = null,
     ) {
         parent::__construct();
     }
@@ -31,6 +32,7 @@ final class SaleCompletedEvent extends DomainEvent
             commissionAmount: $commission?->getAmount()->getValue() ?? 0,
             commissionRate: $commission?->getRate() ?? 0.0,
             commissionCurrency: $commission?->getAmount()->currency ?? $sale->getTotalAmount()->currency,
+            agentId: $sale->getAgentId()?->getValue(),
         );
     }
 

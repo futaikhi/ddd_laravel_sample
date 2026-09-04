@@ -45,7 +45,7 @@ final readonly class ProjectSaleReportsOnSaleCompletedHandler
         );
 
         $this->readModels->incrementCommissionSummary(
-            agentId: null,
+            agentId: $event->agentId,
             periodStart: $reportDate,
             periodEnd: $reportDate,
             completedSalesCountDelta: 1,

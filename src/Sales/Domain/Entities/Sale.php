@@ -16,6 +16,7 @@ use Src\Sales\Domain\Exceptions\MinimumOrderAmountException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCancelledException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeCompletedException;
 use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
+use Src\Sales\Domain\ValueObjects\AgentId;
 use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
@@ -44,14 +45,19 @@ final class Sale extends BaseEntity
         private ?PaymentMethod $paymentMethod = null,
         private ?string $transactionId = null,
         private ?Commission $commission = null,
+        private readonly ?AgentId $agentId = null,
     ) {
     }
 
     /**
      * @param list<LineItem> $lineItems
      */
-    public static function create(SaleId $id, CustomerId $customerId, array $lineItems): self
-    {
+    public static function create(
+        SaleId $id,
+        CustomerId $customerId,
+        array $lineItems,
+        ?AgentId $agentId = null,
+    ): self {
         if ($lineItems === []) {
             throw new InvalidArgumentException('Sale must have at least one line item');
         }
@@ -84,6 +90,7 @@ final class Sale extends BaseEntity
             totalAmount: $totalAmount,
             status: OrderStatus::PENDING,
             createdAt: new DateTimeImmutable(),
+            agentId: $agentId,
         );
 
         $sale->recordLast(SaleCreatedEvent::fromEntity($sale));
@@ -108,6 +115,7 @@ final class Sale extends BaseEntity
         ?PaymentMethod $paymentMethod = null,
         ?string $transactionId = null,
         ?Commission $commission = null,
+        ?AgentId $agentId = null,
     ): self {
         return new self(
             id: $id,
@@ -123,6 +131,7 @@ final class Sale extends BaseEntity
             paymentMethod: $paymentMethod,
             transactionId: $transactionId,
             commission: $commission,
+            agentId: $agentId,
         );
     }
 
@@ -178,6 +187,11 @@ final class Sale extends BaseEntity
     public function getCustomerId(): CustomerId
     {
         return $this->customerId;
+    }
+
+    public function getAgentId(): ?AgentId
+    {
+        return $this->agentId;
     }
 
     /**

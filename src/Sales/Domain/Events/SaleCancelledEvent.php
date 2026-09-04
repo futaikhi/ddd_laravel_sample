@@ -13,6 +13,7 @@ final class SaleCancelledEvent extends DomainEvent
         public readonly string $saleId,
         public readonly string $reason,
         public readonly string $cancelledAt,
+        public readonly ?string $agentId = null,
     ) {
         parent::__construct();
     }
@@ -23,6 +24,7 @@ final class SaleCancelledEvent extends DomainEvent
             saleId: $sale->getId()->getValue(),
             reason: $sale->getCancellationReason() ?? '',
             cancelledAt: $sale->getCancelledAt()?->format('Y-m-d H:i:s') ?? '',
+            agentId: $sale->getAgentId()?->getValue(),
         );
     }
 

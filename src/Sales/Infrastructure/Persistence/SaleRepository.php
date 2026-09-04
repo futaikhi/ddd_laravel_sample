@@ -11,6 +11,7 @@ use Src\Sales\Domain\Enums\OrderStatus;
 use Src\Sales\Domain\Enums\PaymentMethod;
 use Src\Sales\Domain\Exceptions\SaleNotFoundException;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
+use Src\Sales\Domain\ValueObjects\AgentId;
 use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
 use Src\Sales\Domain\ValueObjects\LineItem;
@@ -35,6 +36,7 @@ final class SaleRepository implements SaleRepositoryInterface
             ['id' => $sale->getId()->getValue()],
             [
                 'customer_id' => $sale->getCustomerId()->getValue(),
+                'agent_id' => $sale->getAgentId()?->getValue(),
                 'status' => $sale->getStatus()->value,
                 'total_amount' => $sale->getTotalAmount()->getValue(),
                 'created_at' => $sale->getCreatedAt()->format('Y-m-d H:i:s'),
@@ -154,6 +156,11 @@ final class SaleRepository implements SaleRepositoryInterface
             );
         }
 
+        $agentIdValue = $model->agent_id;
+        $agentId = $agentIdValue !== null && $agentIdValue !== ''
+            ? AgentId::fromString((string) $agentIdValue)
+            : null;
+
         return Sale::reconstitute(
             id: SaleId::fromString((string) $model->id),
             customerId: CustomerId::fromString((string) $model->customer_id),
@@ -170,6 +177,7 @@ final class SaleRepository implements SaleRepositoryInterface
                 : null,
             transactionId: $model->transaction_id !== null ? (string) $model->transaction_id : null,
             commission: $commission,
+            agentId: $agentId,
         );
     }
 

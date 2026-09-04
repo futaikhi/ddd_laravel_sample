@@ -11,6 +11,7 @@ use Src\Sales\Application\EventHandlers\ProjectSaleListItemOnSaleCancelledHandle
 use Src\Sales\Application\EventHandlers\ProjectSaleListItemOnSaleConfirmedHandler;
 use Src\Sales\Application\EventHandlers\ProjectSaleListItemOnSaleCreatedHandler;
 use Src\Sales\Application\EventHandlers\ProjectSaleReportsOnSaleCompletedHandler;
+use Src\Sales\Application\EventHandlers\SendCancellationEmailHandler;
 use Src\Sales\Application\EventHandlers\SendConfirmationEmailHandler;
 use Src\Sales\Application\EventHandlers\UpdateCommissionProjectionHandler;
 use Src\Sales\Application\EventHandlers\UpdateSalesMetricsHandler;
@@ -65,6 +66,7 @@ class EventServiceProvider extends ServiceProvider
             // completed sale).
             ProjectSaleListItemOnSaleCancelledHandler::class,
             // Side effects
+            SendCancellationEmailHandler::class,
             LogAuditTrailHandler::class,
         ],
     ];

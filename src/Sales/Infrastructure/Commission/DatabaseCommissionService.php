@@ -12,13 +12,14 @@ use Src\Sales\Domain\ValueObjects\Commission;
 final class DatabaseCommissionService implements CommissionCalculatorInterface
 {
     /**
-     * Calculate commission based on sale amount using business rules
+     * Calculate commission based on sale amount using business rules.
      *
-     * Business Rules:
-     * - If total amount > Rp 1,000,000: 5% commission
-     * - If total amount <= Rp 1,000,000: 3% commission
+     * Business Rules (aligned with Task.txt deep-dive):
+     * - If total amount >= Rp 1,000,000  => 5% commission
+     * - Else if total amount >= Rp 500,000 => 3% commission
+     * - Otherwise                          => 1% commission
      *
-     * This logic could be extended to query from a commission_rates table
+     * This logic could be extended to query a commission_rates table
      * or use a rate engine service.
      */
     public function calculate(Sale $sale): Commission
@@ -43,22 +44,28 @@ final class DatabaseCommissionService implements CommissionCalculatorInterface
     }
 
     /**
-     * Determine commission rate based on sale amount
+     * Determine commission rate based on sale amount.
      *
-     * Could be extended to:
-     * - Query from database table
-     * - Use tiered rate structure
+     * Tiered structure derived from Task.txt:
+     * - >= 1,000,000  => 5%
+     * - >= 500,000    => 3%
+     * - otherwise     => 1%
+     *
+     * This could be extended to:
+     * - Query a database table
      * - Consider customer tier/loyalty
-     * - Use external rate engine
+     * - Use an external rate engine
      */
     private function determineRate(int $amount): float
     {
-        // Business rule: amounts > 1 million get 5% commission
-        if ($amount > 1000000) {
+        if ($amount >= 1_000_000) {
             return 5.0;
         }
 
-        // Default: 3% commission for smaller amounts
-        return 3.0;
+        if ($amount >= 500_000) {
+            return 3.0;
+        }
+
+        return 1.0;
     }
 }

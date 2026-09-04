@@ -18,6 +18,7 @@ final class SaleCreatedEvent extends DomainEvent
         public readonly int $totalAmount,
         public readonly array $items = [],
         public readonly ?string $createdAt = null,
+        public readonly ?string $agentId = null,
     ) {
         parent::__construct();
     }
@@ -39,6 +40,7 @@ final class SaleCreatedEvent extends DomainEvent
                 $sale->getLineItems(),
             ),
             createdAt: $sale->getCreatedAt()->format('Y-m-d H:i:s'),
+            agentId: $sale->getAgentId()?->getValue(),
         );
     }
 
