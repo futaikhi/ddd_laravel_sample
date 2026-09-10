@@ -16,7 +16,7 @@ info:
        │                     
        └──cancel──▶ CANCELLED
     ```
-  version: 1.1.0
+  version: 1.2.0
   contact:
     name: Futaikhi
     url: https://futaikhi.vercel.app/
@@ -153,7 +153,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  id:      { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
+                  id: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX", description: "ULID assigned to the sale" }
+                  invoice_number: { type: string, nullable: true, example: "INV-20260910-0001", description: "Human-readable, backend-generated invoice number. Format INV-YYYYMMDD-NNNN. Persisted and unique." }
                   message: { type: string, example: "Sale created successfully" }
         '404':
           description: |
@@ -169,6 +170,10 @@ paths:
                 product:
                   value: { error: "product_not_found",  message: "Product 01ARZ3NDEKTSV4RRFFQ69G5FAW was not found." }
         '422': { $ref: '#/components/responses/ValidationError' }
+
+    # ─────────────────────────────────────────────────────────────
+    # CSV bulk import
+    # ─────────────────────────────────────────────────────────────
 
     get:
       summary: List sales (paginated, filterable)
@@ -201,6 +206,89 @@ paths:
                   page:       { type: integer, example: 1 }
                   totalCount: { type: integer, example: 87 }
         '422': { $ref: '#/components/responses/ValidationError' }
+  /sales/import-csv:
+    post:
+      summary: Bulk-create sales from a CSV file
+      description: |
+        Uploads a CSV file that contains **one line-item row per line**. Rows are grouped by the
+        `import_ref` column into individual `Sale` aggregates (one aggregate per group).
+
+        For each successfully created sale, the backend:
+          * generates a fresh `SaleId` (ULID)
+          * generates a permanent, human-readable `invoice_number` (`INV-YYYYMMDD-NNNN`)
+          * dispatches the same `CreateSaleCommand` used by the JSON endpoint (`POST /sales`)
+
+        The `import_ref` column is a **temporary grouping key only** — it is never stored in the
+        database. Use it in the CSV to indicate which rows belong to the same sale.
+
+        ### CSV format
+
+        Header row is required. Column order does not matter, but names must match exactly:
+
+        ```
+        import_ref,customer_id,product_id,quantity
+        sale-001,01H8M6KJ5NQ8XX4P0N2VYJ4K5A,01H8M6KJ5NQ8XX4P0N2VYJ4P01,2
+        sale-001,01H8M6KJ5NQ8XX4P0N2VYJ4K5A,01H8M6KJ5NQ8XX4P0N2VYJ4P02,1
+        sale-002,01H8M6KJ5NQ8XX4P0N2VYJ4K5B,01H8M6KJ5NQ8XX4P0N2VYJ4P01,1
+        ```
+
+        ### Row-level rules
+        * All rows sharing the same `import_ref` **must** use the same `customer_id`.
+        * `product_id` must be **unique within a single `import_ref` group** (no duplicate lines).
+        * `quantity` must be an integer `>= 1`.
+        * All domain-level rules from `POST /sales` apply (min amount, max 20 line items, existing customer/product).
+
+        ### Failure strategy
+        **Fail entire import**: if any row is invalid (bad format, unknown customer, unknown product,
+        duplicate product within a group, mismatched customer_id, domain rule violation, etc.) — no
+        sales are persisted and `422 Unprocessable Entity` is returned with a per-row error list.
+
+        **Command dispatched (per group):** `CreateSaleCommand`
+        **Action:** `Apps\Api\Sales\ImportCsv\ImportSalesCsvAction`
+      tags: [Sales Commands]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: "CSV file (text/csv or text/plain). Max 2048 KB."
+      responses:
+        '201':
+          description: All groups were valid and every sale was created successfully.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesCsvImportResponse' }
+              example:
+                total_rows: 6
+                created_sales: 3
+                failed_rows: 0
+                sales:
+                  - { import_ref: "sale-001", sale_id: "01J...", invoice_number: "INV-20260910-0001" }
+                  - { import_ref: "sale-002", sale_id: "01J...", invoice_number: "INV-20260910-0002" }
+                  - { import_ref: "sale-003", sale_id: "01J...", invoice_number: "INV-20260910-0003" }
+                errors: []
+        '422':
+          description: |
+            At least one row failed validation. No sales were persisted. The `errors` array
+            enumerates every offending row (row number is 1-based, header row is row 1).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesCsvImportResponse' }
+              example:
+                total_rows: 6
+                created_sales: 0
+                failed_rows: 2
+                sales: []
+                errors:
+                  - { row: 3, import_ref: "sale-001", field: "customer_id", message: "All rows sharing the same import_ref must use the same customer_id." }
+                  - { row: 5, import_ref: "sale-002", field: "product_id",  message: "Duplicate product_id within the same import_ref is not allowed." }
+
 
   /sales/{id}:
     get:
@@ -410,19 +498,21 @@ components:
     SaleListItemRM:
       type: object
       properties:
-        id:          { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
-        customerId:  { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }
-        status:      { $ref: '#/components/schemas/OrderStatus' }
+        id: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
+        invoiceNumber: { type: string, nullable: true, example: "INV-20260910-0001", description: "Backend-generated invoice number. Nullable for legacy sales created before the feature was added." }
+        customerId: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }
+        status: { $ref: '#/components/schemas/OrderStatus' }
         totalAmount: { type: integer, example: 30500000 }
-        currency:    { type: string,  example: "IDR" }
-        createdAt:   { type: string,  example: "2026-08-15 10:12:00" }
+        currency: { type: string, example: "IDR" }
+        createdAt: { type: string, example: "2026-08-15 10:12:00" }
 
     SaleDetailRM:
       type: object
       properties:
-        id:                 { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
-        customerId:         { type: string,  example: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }
-        status:             { $ref: '#/components/schemas/OrderStatus' }
+        id: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAX" }
+        invoiceNumber: { type: string, nullable: true, example: "INV-20260910-0001", description: "Backend-generated invoice number." }
+        customerId: { type: string, example: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }
+        status: { $ref: '#/components/schemas/OrderStatus' }
         totalAmount:        { type: integer, example: 30500000 }
         currency:           { type: string,  example: "IDR" }
         lineItems:
@@ -454,6 +544,71 @@ components:
         completedSalesCount: { type: integer, example: 42 }
         totalCommission:     { type: integer, example: 37035000, description: "Sum of commission_amount (minor units)" }
         currency:            { type: string,  example: "IDR" }
+
+    # ── CSV Import response (POST /sales/import-csv) ──
+    SalesCsvImportResponse:
+      type: object
+      description: >
+        Response body returned by `POST /sales/import-csv`. On success (201) all rows
+        were valid and every sale was persisted. On failure (422) no sales were
+        persisted (fail-entire-import strategy) and `errors[]` lists every offending row.
+      required: [total_rows, created_sales, failed_rows, sales, errors]
+      properties:
+        total_rows:
+          type: integer
+          example: 6
+          description: "Total number of data rows read from the CSV (excluding the header)."
+        created_sales:
+          type: integer
+          example: 3
+          description: "Number of Sale aggregates created (unique `import_ref` groups). 0 on 422."
+        failed_rows:
+          type: integer
+          example: 0
+          description: "Number of rows that failed validation. Non-zero implies 422 and no sales were created."
+        sales:
+          type: array
+          description: "Created sales (empty on 422). One entry per unique `import_ref`."
+          items:
+            type: object
+            required: [import_ref, sale_id, invoice_number]
+            properties:
+              import_ref:
+                type: string
+                example: "sale-001"
+                description: "Grouping key from the CSV. Not persisted."
+              sale_id:
+                type: string
+                format: ulid
+                example: "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+              invoice_number:
+                type: string
+                example: "INV-20260910-0001"
+                description: "Backend-generated invoice number (format INV-YYYYMMDD-NNNN)."
+        errors:
+          type: array
+          description: "Per-row validation errors. Empty on 201."
+          items:
+            type: object
+            required: [row, message]
+            properties:
+              row:
+                type: integer
+                example: 3
+                description: "1-based CSV row number (header is row 1, first data row is row 2)."
+              import_ref:
+                type: string
+                nullable: true
+                example: "sale-002"
+                description: "The `import_ref` cell for that row, if it could be read."
+              field:
+                type: string
+                nullable: true
+                example: "quantity"
+                description: "Name of the offending column, if the failure is scoped to one field."
+              message:
+                type: string
+                example: "quantity must be a positive integer"
 
     # ── Error envelope (returned by exception handlers in bootstrap/app.php)
     ErrorEnvelope:
