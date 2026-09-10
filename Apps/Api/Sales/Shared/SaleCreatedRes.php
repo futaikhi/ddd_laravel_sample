@@ -11,6 +11,7 @@ final readonly class SaleCreatedRes extends BaseRes
     public function __construct(
         public string $id,
         public string $message = 'Sale created successfully',
+        public ?string $invoiceNumber = null,
     ) {
     }
 }

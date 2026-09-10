@@ -52,6 +52,7 @@ interface SaleReadModelRepositoryInterface
         int $totalAmount,
         string $currency,
         ?string $createdAt,
+        ?string $invoiceNumber = null,
     ): void;
 
     public function updateSaleListItemStatus(

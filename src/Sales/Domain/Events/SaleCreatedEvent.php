@@ -10,7 +10,7 @@ use Src\Shared\Framework\Domain\Events\DomainEvent;
 final class SaleCreatedEvent extends DomainEvent
 {
     /**
-     * @param list<array{productId: string, quantity: int, unitPrice: int, currency: string, total: int}> $items
+     * @param  list<array{productId: string, quantity: int, unitPrice: int, currency: string, total: int}>  $items
      */
     public function __construct(
         public readonly string $saleId,
@@ -19,6 +19,7 @@ final class SaleCreatedEvent extends DomainEvent
         public readonly array $items = [],
         public readonly ?string $createdAt = null,
         public readonly ?string $agentId = null,
+        public readonly ?string $invoiceNumber = null,
     ) {
         parent::__construct();
     }
@@ -41,6 +42,7 @@ final class SaleCreatedEvent extends DomainEvent
             ),
             createdAt: $sale->getCreatedAt()->format('Y-m-d H:i:s'),
             agentId: $sale->getAgentId()?->getValue(),
+            invoiceNumber: $sale->getInvoiceNumber()?->getValue(),
         );
     }
 

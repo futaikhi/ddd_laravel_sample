@@ -62,6 +62,7 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
             completedAt: $this->fmtNullable($sale->completed_at ?? null),
             cancelledAt: $this->fmtNullable($sale->cancelled_at ?? null),
             cancellationReason: $this->rowStringOrNull($sale, 'cancellation_reason'),
+            invoiceNumber: $this->rowStringOrNull($sale, 'invoice_number'),
         );
     }
 
@@ -109,6 +110,7 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
                 totalAmount: $this->rowInt($row, 'total_amount'),
                 currency: $this->rowString($row, 'currency'),
                 createdAt: $this->fmt($row->created_at ?? null),
+                invoiceNumber: $this->rowStringOrNull($row, 'invoice_number'),
             );
         }
 
@@ -180,12 +182,14 @@ final class SaleReadModelRepository implements SaleReadModelRepositoryInterface
         int $totalAmount,
         string $currency,
         ?string $createdAt,
+        ?string $invoiceNumber = null,
     ): void {
         $now = now();
 
         DB::table('sale_list_items')->updateOrInsert(
             ['id' => $saleId],
             [
+                'invoice_number' => $invoiceNumber,
                 'customer_id' => $customerId,
                 'customer_name' => $customerName,
                 'status' => $status,

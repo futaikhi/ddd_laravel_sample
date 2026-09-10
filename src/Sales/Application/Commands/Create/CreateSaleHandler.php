@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Exceptions\CustomerNotFoundException;
 use Src\Sales\Domain\Ports\CustomerExistenceCheckerInterface;
+use Src\Sales\Domain\Ports\InvoiceNumberGeneratorInterface;
 use Src\Sales\Domain\Ports\ProductCatalogInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\LineItem;
@@ -19,6 +20,7 @@ final readonly class CreateSaleHandler implements CommandHandlerInterface
         private SaleRepositoryInterface $repository,
         private CustomerExistenceCheckerInterface $customers,
         private ProductCatalogInterface $products,
+        private InvoiceNumberGeneratorInterface $invoiceNumbers,
     ) {
     }
 
@@ -39,11 +41,14 @@ final readonly class CreateSaleHandler implements CommandHandlerInterface
             $lineItems[] = $this->products->lineItemFor($item->productId, $item->quantity);
         }
 
+        $invoiceNumber = $command->invoiceNumber ?? $this->invoiceNumbers->next();
+
         $sale = Sale::create(
             id: $command->id,
             customerId: $command->customerId,
             lineItems: $lineItems,
             agentId: $command->agentId,
+            invoiceNumber: $invoiceNumber,
         );
 
         $this->repository->store($sale);

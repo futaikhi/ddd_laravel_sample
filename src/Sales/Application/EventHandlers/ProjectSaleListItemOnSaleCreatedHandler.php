@@ -27,6 +27,7 @@ final readonly class ProjectSaleListItemOnSaleCreatedHandler
             totalAmount: $event->totalAmount,
             currency: $currency,
             createdAt: $event->createdAt,
+            invoiceNumber: $event->invoiceNumber,
         );
     }
 }

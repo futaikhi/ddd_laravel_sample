@@ -7,10 +7,13 @@ namespace Tests\Unit\Sales;
 use Apps\Api\Sales\Create\CreateSaleAction;
 use Apps\Api\Sales\Create\CreateSaleDto;
 use Apps\Api\Sales\Create\LineItemInputDto;
+use DateTimeImmutable;
 use PHPUnit\Framework\Attributes\Test;
 use Src\Sales\Application\Commands\Create\CreateSaleCommand;
 use Src\Sales\Application\Commands\Create\CreateSaleLineItem;
+use Src\Sales\Domain\Ports\InvoiceNumberGeneratorInterface;
 use Src\Sales\Domain\ValueObjects\CustomerId;
+use Src\Sales\Domain\ValueObjects\InvoiceNumber;
 use Src\Sales\Domain\ValueObjects\SaleId;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandBusInterface;
 use Tests\TestCase;
@@ -29,7 +32,14 @@ final class CreateSaleActionTest extends TestCase
                 $capturedCommand = $command;
             });
 
-        $action = new CreateSaleAction($commandBus);
+        $invoiceNumbers = new class implements InvoiceNumberGeneratorInterface {
+            public function next(?DateTimeImmutable $referenceDate = null): InvoiceNumber
+            {
+                return InvoiceNumber::fromString('INV-20260910-0001');
+            }
+        };
+
+        $action = new CreateSaleAction($commandBus, $invoiceNumbers);
         $saleId = SaleId::random();
         $customerId = CustomerId::random();
 

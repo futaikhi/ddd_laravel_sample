@@ -12,6 +12,9 @@ use Apps\Api\Sales\Confirm\ConfirmSaleAction;
 use Apps\Api\Sales\Confirm\ConfirmSaleRequest;
 use Apps\Api\Sales\Create\CreateSaleAction;
 use Apps\Api\Sales\Create\CreateSaleRequest;
+use Apps\Api\Sales\ImportCsv\ImportSalesCsvAction;
+use Apps\Api\Sales\ImportCsv\ImportSalesCsvDto;
+use Apps\Api\Sales\ImportCsv\ImportSalesCsvRequest;
 use Apps\Api\Sales\Index\IndexSalesAction;
 use Apps\Api\Sales\Index\IndexSalesRequest;
 use Apps\Api\Sales\Reports\CommissionSummaryAction;
@@ -30,6 +33,17 @@ final class SalesController
         $resource = $action($request->getDto());
 
         return response()->json($resource, 201);
+    }
+
+    public function importCsv(
+        ImportSalesCsvRequest $request,
+        ImportSalesCsvAction $action,
+    ): JsonResponse {
+        $resource = $action(new ImportSalesCsvDto(file: $request->getUploadedFile()));
+
+        $status = $resource->failed_rows === 0 ? 201 : 422;
+
+        return response()->json($resource, $status);
     }
 
     public function confirm(

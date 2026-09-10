@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Sales\Handlers;
 
+use DateTimeImmutable;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use Src\Sales\Application\Commands\Create\CreateSaleCommand;
@@ -13,9 +14,11 @@ use Src\Sales\Domain\Entities\Sale;
 use Src\Sales\Domain\Enums\OrderStatus;
 use Src\Sales\Domain\Exceptions\CustomerNotFoundException;
 use Src\Sales\Domain\Ports\CustomerExistenceCheckerInterface;
+use Src\Sales\Domain\Ports\InvoiceNumberGeneratorInterface;
 use Src\Sales\Domain\Ports\ProductCatalogInterface;
 use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\CustomerId;
+use Src\Sales\Domain\ValueObjects\InvoiceNumber;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\ProductId;
@@ -29,7 +32,7 @@ final class CreateSaleHandlerTest extends TestCase
         $repo = $this->makeRepo();
         $checker = $this->makeChecker(true);
         $catalog = $this->makeCatalog(Money::fromCents(30000, 'IDR'));
-        $handler = new CreateSaleHandler($repo, $checker, $catalog);
+        $handler = new CreateSaleHandler($repo, $checker, $catalog, $this->makeInvoiceGenerator());
 
         $command = new CreateSaleCommand(
             id: SaleId::random(),
@@ -48,7 +51,7 @@ final class CreateSaleHandlerTest extends TestCase
     public function test_it_persists_the_created_aggregate_with_recorded_events_for_repository_publishing(): void
     {
         $repo = $this->makeRepo();
-        $handler = new CreateSaleHandler($repo, $this->makeChecker(true), $this->makeCatalog(Money::fromCents(50000, 'IDR')));
+        $handler = new CreateSaleHandler($repo, $this->makeChecker(true), $this->makeCatalog(Money::fromCents(50000, 'IDR')), $this->makeInvoiceGenerator());
         $saleId = SaleId::random();
 
         $handler(new CreateSaleCommand(
@@ -76,7 +79,7 @@ final class CreateSaleHandlerTest extends TestCase
             }
         }
 
-        $this->assertSame([SaleRepositoryInterface::class, CustomerExistenceCheckerInterface::class, ProductCatalogInterface::class], $paramTypes);
+        $this->assertSame([SaleRepositoryInterface::class, CustomerExistenceCheckerInterface::class, ProductCatalogInterface::class, InvoiceNumberGeneratorInterface::class], $paramTypes);
         foreach ($paramTypes as $paramType) {
             $this->assertStringNotContainsString('ReadModelRepository', $paramType, 'Command handler must not depend on read-model repositories');
         }
@@ -87,7 +90,7 @@ final class CreateSaleHandlerTest extends TestCase
         $repo = $this->makeRepo();
         $catalog = $this->createMock(ProductCatalogInterface::class);
         $catalog->expects($this->never())->method('lineItemFor');
-        $handler = new CreateSaleHandler($repo, $this->makeChecker(false), $catalog);
+        $handler = new CreateSaleHandler($repo, $this->makeChecker(false), $catalog, $this->makeInvoiceGenerator());
 
         $this->expectException(CustomerNotFoundException::class);
 
@@ -162,6 +165,16 @@ final class CreateSaleHandlerTest extends TestCase
                     quantity: $quantity,
                     unitPrice: $this->unitPrice,
                 );
+            }
+        };
+    }
+
+    private function makeInvoiceGenerator(): InvoiceNumberGeneratorInterface
+    {
+        return new class implements InvoiceNumberGeneratorInterface {
+            public function next(?DateTimeImmutable $referenceDate = null): InvoiceNumber
+            {
+                return InvoiceNumber::fromString('INV-20260910-0001');
             }
         };
     }

@@ -19,6 +19,7 @@ use Src\Sales\Domain\Exceptions\SaleCannotBeConfirmedException;
 use Src\Sales\Domain\ValueObjects\AgentId;
 use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
+use Src\Sales\Domain\ValueObjects\InvoiceNumber;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\SaleId;
@@ -29,7 +30,7 @@ final class Sale extends BaseEntity
     private const MINIMUM_ORDER_AMOUNT = 50000;
 
     /**
-     * @param list<LineItem> $lineItems
+     * @param  list<LineItem>  $lineItems
      */
     private function __construct(
         private readonly SaleId $id,
@@ -46,17 +47,19 @@ final class Sale extends BaseEntity
         private ?string $transactionId = null,
         private ?Commission $commission = null,
         private readonly ?AgentId $agentId = null,
+        private readonly ?InvoiceNumber $invoiceNumber = null,
     ) {
     }
 
     /**
-     * @param list<LineItem> $lineItems
+     * @param  list<LineItem>  $lineItems
      */
     public static function create(
         SaleId $id,
         CustomerId $customerId,
         array $lineItems,
         ?AgentId $agentId = null,
+        ?InvoiceNumber $invoiceNumber = null,
     ): self {
         if ($lineItems === []) {
             throw new InvalidArgumentException('Sale must have at least one line item');
@@ -91,6 +94,7 @@ final class Sale extends BaseEntity
             status: OrderStatus::PENDING,
             createdAt: new DateTimeImmutable(),
             agentId: $agentId,
+            invoiceNumber: $invoiceNumber,
         );
 
         $sale->recordLast(SaleCreatedEvent::fromEntity($sale));
@@ -99,7 +103,7 @@ final class Sale extends BaseEntity
     }
 
     /**
-     * @param list<LineItem> $lineItems
+     * @param  list<LineItem>  $lineItems
      */
     public static function reconstitute(
         SaleId $id,
@@ -116,6 +120,7 @@ final class Sale extends BaseEntity
         ?string $transactionId = null,
         ?Commission $commission = null,
         ?AgentId $agentId = null,
+        ?InvoiceNumber $invoiceNumber = null,
     ): self {
         return new self(
             id: $id,
@@ -132,6 +137,7 @@ final class Sale extends BaseEntity
             transactionId: $transactionId,
             commission: $commission,
             agentId: $agentId,
+            invoiceNumber: $invoiceNumber,
         );
     }
 
@@ -192,6 +198,11 @@ final class Sale extends BaseEntity
     public function getAgentId(): ?AgentId
     {
         return $this->agentId;
+    }
+
+    public function getInvoiceNumber(): ?InvoiceNumber
+    {
+        return $this->invoiceNumber;
     }
 
     /**

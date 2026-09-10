@@ -13,6 +13,7 @@ use Src\Reservation\Infrastructure\Persistence\BookingReadModelRepository;
 use Src\Reservation\Infrastructure\Persistence\BookingRepository;
 use Src\Sales\Domain\Ports\CommissionCalculatorInterface;
 use Src\Sales\Domain\Ports\CustomerExistenceCheckerInterface;
+use Src\Sales\Domain\Ports\InvoiceNumberGeneratorInterface;
 use Src\Sales\Domain\Ports\PaymentGatewayInterface;
 use Src\Sales\Domain\Ports\ProductCatalogInterface;
 use Src\Sales\Domain\Repositories\SaleReadModelRepositoryInterface;
@@ -20,6 +21,7 @@ use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Infrastructure\Commission\DatabaseCommissionService;
 use Src\Sales\Infrastructure\Commission\MockCommissionService;
 use Src\Sales\Infrastructure\Customer\EloquentCustomerExistenceChecker;
+use Src\Sales\Infrastructure\Invoice\DateSequenceInvoiceNumberGenerator;
 use Src\Sales\Infrastructure\Payment\LaravelPaymentGatewayAdapter;
 use Src\Sales\Infrastructure\Payment\MockPaymentGatewayAdapter;
 use Src\Sales\Infrastructure\Persistence\SaleReadModelRepository;
@@ -50,6 +52,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(SaleReadModelRepositoryInterface::class, SaleReadModelRepository::class);
         $this->app->bind(CustomerExistenceCheckerInterface::class, EloquentCustomerExistenceChecker::class);
         $this->app->bind(ProductCatalogInterface::class, EloquentProductCatalog::class);
+        $this->app->bind(InvoiceNumberGeneratorInterface::class, DateSequenceInvoiceNumberGenerator::class);
 
         $this->registerSalesAdapters();
 

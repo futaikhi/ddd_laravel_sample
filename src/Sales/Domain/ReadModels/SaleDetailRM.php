@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Src\Sales\Domain\ReadModels;
 
 /**
- * @param list<SaleLineItemRM> $lineItems
+ * @param  list<SaleLineItemRM>  $lineItems
  */
 final readonly class SaleDetailRM
 {
@@ -26,6 +26,7 @@ final readonly class SaleDetailRM
         public ?string $completedAt = null,
         public ?string $cancelledAt = null,
         public ?string $cancellationReason = null,
+        public ?string $invoiceNumber = null,
     ) {
     }
 }

@@ -7,12 +7,14 @@ namespace Apps\Api\Sales\Create;
 use Apps\Api\Sales\Shared\SaleCreatedRes;
 use Src\Sales\Application\Commands\Create\CreateSaleCommand;
 use Src\Sales\Application\Commands\Create\CreateSaleLineItem;
+use Src\Sales\Domain\Ports\InvoiceNumberGeneratorInterface;
 use Src\Shared\Framework\Infrastructure\Bus\CommandBus\CommandBusInterface;
 
 final readonly class CreateSaleAction
 {
     public function __construct(
         private CommandBusInterface $commandBus,
+        private InvoiceNumberGeneratorInterface $invoiceNumbers,
     ) {
     }
 
@@ -26,12 +28,18 @@ final readonly class CreateSaleAction
             $dto->lineItems,
         );
 
+        $invoiceNumber = $this->invoiceNumbers->next();
+
         $this->commandBus->dispatch(new CreateSaleCommand(
             id: $dto->id,
             customerId: $dto->customerId,
             items: $items,
+            invoiceNumber: $invoiceNumber,
         ));
 
-        return new SaleCreatedRes(id: $dto->id->getValue());
+        return new SaleCreatedRes(
+            id: $dto->id->getValue(),
+            invoiceNumber: $invoiceNumber->getValue(),
+        );
     }
 }

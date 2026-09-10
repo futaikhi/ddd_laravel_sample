@@ -14,6 +14,7 @@ use Src\Sales\Domain\Repositories\SaleRepositoryInterface;
 use Src\Sales\Domain\ValueObjects\AgentId;
 use Src\Sales\Domain\ValueObjects\Commission;
 use Src\Sales\Domain\ValueObjects\CustomerId;
+use Src\Sales\Domain\ValueObjects\InvoiceNumber;
 use Src\Sales\Domain\ValueObjects\LineItem;
 use Src\Sales\Domain\ValueObjects\Money;
 use Src\Sales\Domain\ValueObjects\ProductId;
@@ -35,6 +36,7 @@ final class SaleRepository implements SaleRepositoryInterface
         SaleModel::updateOrCreate(
             ['id' => $sale->getId()->getValue()],
             [
+                'invoice_number' => $sale->getInvoiceNumber()?->getValue(),
                 'customer_id' => $sale->getCustomerId()->getValue(),
                 'agent_id' => $sale->getAgentId()?->getValue(),
                 'status' => $sale->getStatus()->value,
@@ -161,6 +163,11 @@ final class SaleRepository implements SaleRepositoryInterface
             ? AgentId::fromString((string) $agentIdValue)
             : null;
 
+        $invoiceNumberValue = $model->invoice_number ?? null;
+        $invoiceNumber = $invoiceNumberValue !== null && $invoiceNumberValue !== ''
+            ? InvoiceNumber::fromString((string) $invoiceNumberValue)
+            : null;
+
         return Sale::reconstitute(
             id: SaleId::fromString((string) $model->id),
             customerId: CustomerId::fromString((string) $model->customer_id),
@@ -178,6 +185,7 @@ final class SaleRepository implements SaleRepositoryInterface
             transactionId: $model->transaction_id !== null ? (string) $model->transaction_id : null,
             commission: $commission,
             agentId: $agentId,
+            invoiceNumber: $invoiceNumber,
         );
     }
 

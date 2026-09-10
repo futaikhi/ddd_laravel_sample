@@ -19,6 +19,7 @@ final class SaleModel extends Model
 
     protected $fillable = [
         'id',
+        'invoice_number',
         'customer_id',
         'agent_id',
         'status',

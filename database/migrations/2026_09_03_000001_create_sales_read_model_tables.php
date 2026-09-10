@@ -10,6 +10,7 @@ return new class extends Migration
     {
         Schema::create('sale_list_items', function (Blueprint $table): void {
             $table->string('id', 26)->primary();
+            $table->string('invoice_number', 32)->nullable();
             $table->string('customer_id', 26);
             $table->string('customer_name')->nullable();
             $table->string('status', 32);
@@ -26,6 +27,7 @@ return new class extends Migration
             $table->index(['customer_id', 'created_at'], 'sale_list_items_customer_created_at_idx');
             $table->index(['created_at', 'id'], 'sale_list_items_created_at_id_idx');
             $table->index('projected_at', 'sale_list_items_projected_at_idx');
+            $table->index('invoice_number', 'sale_list_items_invoice_number_idx');
         });
 
         Schema::create('sales_reports', function (Blueprint $table): void {

@@ -7,7 +7,7 @@ namespace Src\Sales\Domain\ReadModels;
 /**
  * Read model for the sales list view (GET /sales).
  *
- * Denormalized flat row containing only fields required by the list endpoint.
+ * Denormalized flat row containing only the fields required by the list endpoint.
  */
 final readonly class SaleListItemRM
 {
@@ -18,6 +18,7 @@ final readonly class SaleListItemRM
         public int $totalAmount,
         public string $currency,
         public string $createdAt,
+        public ?string $invoiceNumber = null,
     ) {
     }
 }
