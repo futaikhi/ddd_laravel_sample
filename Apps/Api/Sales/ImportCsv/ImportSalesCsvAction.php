@@ -35,14 +35,14 @@ final readonly class ImportSalesCsvAction
 
     public function __invoke(ImportSalesCsvDto $dto): SalesCsvImportRes
     {
-        [$rows, $parseErrors] = $this->parseCsv($dto->file);
+        [$rows, $parseErrors, $totalRows] = $this->parseCsv($dto->file);
 
         // If parsing produced errors, fail the entire import up-front.
         if ($parseErrors !== []) {
             return new SalesCsvImportRes(
-                total_rows: count($rows),
+                total_rows: $totalRows,
                 created_sales: 0,
-                failed_rows: count($parseErrors),
+                failed_rows: $this->countFailedRows($parseErrors),
                 sales: [],
                 errors: $parseErrors,
             );
@@ -91,9 +91,9 @@ final readonly class ImportSalesCsvAction
 
         if ($groupErrors !== []) {
             return new SalesCsvImportRes(
-                total_rows: count($rows),
+                total_rows: $totalRows,
                 created_sales: 0,
-                failed_rows: count($groupErrors),
+                failed_rows: $this->countFailedRows($groupErrors),
                 sales: [],
                 errors: $groupErrors,
             );
@@ -168,16 +168,16 @@ final readonly class ImportSalesCsvAction
         }
 
         return new SalesCsvImportRes(
-            total_rows: count($rows),
+            total_rows: $totalRows,
             created_sales: count($sales),
-            failed_rows: count($dispatchErrors),
+            failed_rows: $this->countFailedRows($dispatchErrors),
             sales: $sales,
             errors: $dispatchErrors,
         );
     }
 
     /**
-     * @return array{0: list<SalesCsvRowDto>, 1: list<array{row: int, import_ref: ?string, field: ?string, message: string}>}
+     * @return array{0: list<SalesCsvRowDto>, 1: list<array{row: int, import_ref: ?string, field: ?string, message: string}>, 2: int}
      */
     private function parseCsv(UploadedFile $file): array
     {
@@ -199,7 +199,7 @@ final readonly class ImportSalesCsvAction
                     'import_ref' => null,
                     'field' => null,
                     'message' => 'CSV file is empty or missing a header row.',
-                ]]];
+                ]], 0];
             }
 
             $header = array_map(
@@ -214,7 +214,7 @@ final readonly class ImportSalesCsvAction
                         'import_ref' => null,
                         'field' => $required,
                         'message' => sprintf('Missing required CSV column: %s.', $required),
-                    ]]];
+                    ]], 0];
                 }
             }
 
@@ -227,6 +227,7 @@ final readonly class ImportSalesCsvAction
             $rows = [];
             /** @var list<array{row: int, import_ref: ?string, field: ?string, message: string}> $errors */
             $errors = [];
+            $totalRows = 0;
 
             $rowNumber = 1; // header is row 1
             while (($record = fgetcsv($handle)) !== false) {
@@ -244,6 +245,7 @@ final readonly class ImportSalesCsvAction
                     continue;
                 }
 
+                $totalRows++;
                 $importRef = $this->readColumn($record, $columnIndex['import_ref']);
                 $customerId = $this->readColumn($record, $columnIndex['customer_id']);
                 $productId = $this->readColumn($record, $columnIndex['product_id']);
@@ -271,10 +273,18 @@ final readonly class ImportSalesCsvAction
                 );
             }
 
-            return [$rows, $errors];
+            return [$rows, $errors, $totalRows];
         } finally {
             fclose($handle);
         }
+    }
+
+    /**
+     * @param list<array{row: int, import_ref: ?string, field: ?string, message: string}> $errors
+     */
+    private function countFailedRows(array $errors): int
+    {
+        return count(array_unique(array_column($errors, 'row')));
     }
 
     /**
